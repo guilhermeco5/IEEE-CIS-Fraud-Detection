@@ -1,0 +1,29 @@
+# Core
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+
+# Modelagem (Semana 3)
+xgboost>=2.0
+lightgbm>=4.0
+
+# Explicabilidade (Semana 4)
+shap>=0.44
+
+# Visualização
+matplotlib>=3.7
+seaborn>=0.12
+
+# Serving (Semana 5)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.0
+
+# Experiment tracking (opcional, se sobrar tempo)
+mlflow>=2.10
+
+# Testes
+pytest>=8.0
+
+# Notebook
+jupyter>=1.0
