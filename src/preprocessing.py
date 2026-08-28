@@ -13,17 +13,27 @@ from src.config import TARGET_COLUMN, TEMPORAL_SPLIT_COLUMN, TEST_SIZE_FRACTION
 
 
 def temporal_train_test_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Divide o dataframe em treino/teste ordenando por tempo.
+    """Divide o dataframe em treino/teste por um corte de VALOR de tempo.
 
-    Os últimos `TEST_SIZE_FRACTION` registros (no tempo) vão para teste,
-    simulando como o modelo veria dados em produção: sempre o futuro
-    em relação ao que foi usado no treino.
+    Os últimos `TEST_SIZE_FRACTION` (no tempo) vão para teste, simulando
+    como o modelo veria dados em produção: sempre o futuro em relação ao
+    que foi usado no treino.
+
+    O corte é por valor de `TEMPORAL_SPLIT_COLUMN` (quantil), não por
+    posição (`iloc`) após sort: um corte posicional pode dividir
+    transações com o mesmo timestamp entre treino e teste, já que o
+    sort não é estável e a ordem entre empates não é determinística.
+    Cortar por valor garante que todo grupo de mesmo timestamp fica
+    inteiro de um único lado.
     """
-    df_sorted = df.sort_values(TEMPORAL_SPLIT_COLUMN).reset_index(drop=True)
-    split_idx = int(len(df_sorted) * (1 - TEST_SIZE_FRACTION))
+    cutoff = df[TEMPORAL_SPLIT_COLUMN].quantile(1 - TEST_SIZE_FRACTION)
 
-    train_df = df_sorted.iloc[:split_idx]
-    test_df = df_sorted.iloc[split_idx:]
+    train_df = df[df[TEMPORAL_SPLIT_COLUMN] < cutoff].sort_values(
+        TEMPORAL_SPLIT_COLUMN, kind="stable"
+    ).reset_index(drop=True)
+    test_df = df[df[TEMPORAL_SPLIT_COLUMN] >= cutoff].sort_values(
+        TEMPORAL_SPLIT_COLUMN, kind="stable"
+    ).reset_index(drop=True)
 
     return train_df, test_df
 

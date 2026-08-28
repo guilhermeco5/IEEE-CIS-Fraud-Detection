@@ -21,8 +21,12 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
     pr_auc = average_precision_score(y_test, y_proba)
 
     fpr, tpr, thresholds = roc_curve(y_test, y_proba)
-    # encontra o recall (tpr) no ponto onde fpr está mais próximo do alvo de negócio
-    idx = np.argmin(np.abs(fpr - TARGET_FPR_FOR_RECALL))
+    # maior fpr ainda dentro do orçamento de negócio: argmin(abs(fpr - alvo))
+    # pode escolher um ponto com fpr ACIMA do alvo (se for numericamente mais
+    # próximo), violando a restrição de negócio "bloquear no máximo X% dos
+    # clientes legítimos". Por isso pegamos o último ponto com fpr <= alvo.
+    within_budget = np.where(fpr <= TARGET_FPR_FOR_RECALL)[0]
+    idx = within_budget[-1] if len(within_budget) else 0
     recall_at_target_fpr = tpr[idx]
     threshold_at_target_fpr = thresholds[idx]
 
