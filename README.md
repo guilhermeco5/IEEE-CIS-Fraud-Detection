@@ -69,10 +69,13 @@ Instruções de execução completas serão adicionadas a partir da Semana 1, co
 
 ## Métricas-alvo (a preencher conforme os resultados)
 
-| Modelo | PR-AUC | Recall @ FPR 1% | Observações |
-|---|---|---|---|
-| Regressão Logística (baseline) | — | — | — |
-| XGBoost | — | — | — |
+Teste temporal (últimos 20%, 118.108 transações, 3.44% de fraude). Detalhes em `docs/metodologia.md`, seção 5.
+
+| Modelo | PR-AUC | ROC-AUC | Recall @ FPR 1% | Observações |
+|---|---|---|---|---|
+| Regressão Logística (baseline) | 0.138 | 0.814 | 0.6% | 213 colunas numéricas; quebra com outliers fora da faixa do treino |
+| XGBoost sem features da Semana 2 | 0.517 | 0.888 | 43.2% | ablação, 431 colunas |
+| **XGBoost** | **0.522** | **0.890** | **43.9%** | 451 colunas, 1.469 árvores |
 
 ## Licença
 

@@ -12,10 +12,12 @@ import pandas as pd
 from src.config import TARGET_COLUMN, TEMPORAL_SPLIT_COLUMN, TEST_SIZE_FRACTION
 
 
-def temporal_train_test_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def temporal_train_test_split(
+    df: pd.DataFrame, test_size: float = TEST_SIZE_FRACTION
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Divide o dataframe em treino/teste por um corte de VALOR de tempo.
 
-    Os últimos `TEST_SIZE_FRACTION` (no tempo) vão para teste, simulando
+    Os últimos `test_size` (no tempo) vão para teste, simulando
     como o modelo veria dados em produção: sempre o futuro em relação ao
     que foi usado no treino.
 
@@ -25,8 +27,11 @@ def temporal_train_test_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
     sort não é estável e a ordem entre empates não é determinística.
     Cortar por valor garante que todo grupo de mesmo timestamp fica
     inteiro de um único lado.
+
+    O mesmo corte é reaplicado dentro do treino para separar a validação
+    de early stopping (o teste nunca é usado para escolher nada).
     """
-    cutoff = df[TEMPORAL_SPLIT_COLUMN].quantile(1 - TEST_SIZE_FRACTION)
+    cutoff = df[TEMPORAL_SPLIT_COLUMN].quantile(1 - test_size)
 
     train_df = df[df[TEMPORAL_SPLIT_COLUMN] < cutoff].sort_values(
         TEMPORAL_SPLIT_COLUMN, kind="stable"

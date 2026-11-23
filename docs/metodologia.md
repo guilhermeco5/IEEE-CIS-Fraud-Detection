@@ -58,12 +58,44 @@ Usamos **frequency encoding** (frequência relativa entre os não-ausentes, ajus
 ## 4. Modelagem e tratamento de desbalanceamento
 
 - **Por que não SMOTE:** gerar exemplos sintéticos de fraude por interpolação entre pontos minoritários pode criar transações que não existem na distribuição real, especialmente em espaços de features de alta dimensão. Optou-se por `scale_pos_weight` (XGBoost) / `class_weight='balanced'` (regressão logística), que ajusta o peso da função de perda sem inventar dados.
-- **Modelos testados:** regressão logística (baseline) → XGBoost.
+- **Modelos testados:** regressão logística (baseline) → XGBoost (`src/train.py`, `python -m src.train`).
+- **Protocolo de validação, todo temporal.** Dentro do treino, os 20% finais no tempo viram validação de early stopping (parada após 100 rodadas sem melhora de PR-AUC). Depois o modelo é retreinado no treino inteiro com o número de árvores escolhido. O teste é usado uma única vez, só para reportar: nada (nem número de árvores, nem limiar) é escolhido olhando para ele.
+- **Baseline:** imputação pela mediana + padronização + regressão logística balanceada, usando só as colunas numéricas com ≤50% de ausência no treino (213 colunas). A logística não aceita `category` nem NaN, e imputar centenas de colunas quase vazias só adiciona ruído e memória.
+- **XGBoost:** `tree_method="hist"` com `enable_categorical=True` (usa as colunas `category` nativamente, complementando o frequency encoding da seção 3), `scale_pos_weight` = negativos/positivos do treino (~28). O peso desloca as probabilidades (o modelo não fica calibrado), mas as métricas usadas só dependem da ordenação.
+- **Custo:** o pipeline completo levou ~59 min numa máquina com 8 GB de RAM e 12 threads (XGBoost ~25 min por modelo, entre early stopping e refit).
 
 ## 5. Métricas de avaliação
 
 - **Por que não acurácia:** com desbalanceamento severo (~3.5% de fraude), um modelo trivial que sempre prevê "não fraude" atinge >96% de acurácia e é inútil.
-- **Métricas usadas:** PR-AUC (Average Precision) e recall a um FPR fixo de 1% — esta última traduzida para a métrica de negócio: "que proporção de fraudes eu detecto, mantendo o bloqueio indevido de clientes legítimos abaixo de 1%?"
+- **Métricas usadas:** PR-AUC (Average Precision) e recall a um FPR fixo de 1% — esta última traduzida para a métrica de negócio: "que proporção de fraudes eu detecto, mantendo o bloqueio indevido de clientes legítimos abaixo de 1%?". ROC-AUC entra só como referência (é otimista sob desbalanceamento).
+- **Ressalva do limiar:** o limiar que dá FPR ≤ 1% é lido na curva do próprio teste. Isso responde "qual o recall neste ponto de operação", mas em produção o limiar teria que ser fixado antes (na validação), e o FPR real poderia passar um pouco de 1%.
+
+### Resultados (Semana 3)
+
+| Modelo | PR-AUC | ROC-AUC | Recall @ FPR 1% | Árvores |
+|---|---|---|---|---|
+| Regressão logística | 0.138 | 0.814 | 0.6% | — |
+| XGBoost sem features da Semana 2 | 0.517 | 0.888 | 43.2% | 1.500 (teto) |
+| **XGBoost** | **0.522** | **0.890** | **43.9%** | 1.469 |
+
+Para referência, um classificador aleatório tem PR-AUC ≈ 0.034 (a taxa de fraude do teste).
+
+- **Baseline quebra nos extremos.** A ROC-AUC de 0.81 mostra que a logística ordena razoavelmente bem no geral, mas o recall a FPR 1% é quase zero. O motivo foi verificado, não é bug de medição: no teste, 1.058 transações recebem probabilidade 1.0 (logit acima de 37, com máximo de 100), e só 9 delas são fraude. São linhas com valores fora da faixa vista no treino (colunas de contagem `C*` e de histórico crescem com o tempo), e um modelo linear sobre features padronizadas mas não limitadas extrapola sem freio. Correção conhecida para uma iteração futura: limitar os valores aos percentis do treino ou aplicar `log1p`/`QuantileTransformer`. Como baseline, o número cumpre o papel de mostrar o piso.
+- **XGBoost é ~3.8x melhor em PR-AUC** e detecta 43.9% das fraudes bloqueando no máximo 1% dos legítimos.
+- **Features da Semana 2: ganho pequeno.** A diferença entre os dois XGBoost é de +0.005 em PR-AUC e +0.7 p.p. em recall. É positiva, mas pequena, e não foi medida a variância (bootstrap/sementes), então não dá para afirmar que é significativa. A ablação também parou no teto de 1.500 árvores sem acionar o early stopping, então ela poderia melhorar um pouco com mais árvores. A comparação está levemente a favor do modelo completo. Leitura honesta: as 431 colunas originais (em especial os blocos anonimizados `V*` e `C*`, que dominam a importância por gain: `V258`, `V70`, `V257`, `V294`, `V91`…) já capturam boa parte do que velocidade e agregação por `card1` trazem. Isso reforça a hipótese da seção 3 de que `card1` é uma entidade grossa demais, e o uid fica como a melhoria mais promissora de features.
+- **Degradação ao longo do teste** (`outputs/metrics/xgboost_por_semana.csv`):
+
+| Semana | Taxa de fraude | PR-AUC | Recall @ FPR 1% |
+|---|---|---|---|
+| 20 | 3.58% | 0.587 | 51.4% |
+| 21 | 3.17% | 0.588 | 50.1% |
+| 22 | 2.85% | 0.539 | 47.0% |
+| 23 | 3.25% | 0.445 | 39.8% |
+| 24 | 3.67% | 0.485 | 39.0% |
+| 25 | 4.16% | 0.524 | 39.7% |
+| 26 (parcial, 2.754 linhas) | 4.32% | 0.475 | 35.3% |
+
+  O recall cai de ~50% nas duas semanas logo após o treino para ~39% a partir da semana 23, sem que a taxa de fraude caia junto. É o padrão esperado de *drift*: os padrões de fraude mudam e o modelo envelhece. Em produção, isso pede retreino periódico (a cada poucas semanas) e monitoramento semanal, exatamente o motivo de a avaliação por semana ter sido pedida na seção 1.
 
 ## 6. Explicabilidade
 

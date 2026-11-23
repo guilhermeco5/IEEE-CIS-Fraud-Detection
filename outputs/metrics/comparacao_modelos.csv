@@ -1,0 +1,4 @@
+,pr_auc,roc_auc,recall_at_fpr_1%,decision_threshold,n_features,segundos,n_arvores
+regressao_logistica,0.1381,0.814,0.0064,1.0,213.0,72.0,
+xgboost,0.5215,0.8904,0.439,0.7169,451.0,1518.0,1469.0
+xgboost_sem_features_semana2,0.5168,0.8879,0.4321,0.7516,431.0,1926.0,1500.0

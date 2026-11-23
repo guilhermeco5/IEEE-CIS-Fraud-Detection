@@ -49,13 +49,26 @@ MISSING_FLAG_COLUMNS = ["id_01", "id_02", "DeviceType", "R_emaildomain"]
 RANDOM_STATE = 42
 
 XGBOOST_PARAMS = {
-    "n_estimators": 500,
+    "n_estimators": 1500,  # teto; o número real sai do early stopping
     "max_depth": 6,
     "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.5,
+    "tree_method": "hist",
+    "enable_categorical": True,  # usa as colunas `category` nativamente
     "scale_pos_weight": None,  # calculado em train.py a partir do desbalanceamento real
     "eval_metric": "aucpr",
     "random_state": RANDOM_STATE,
 }
+EARLY_STOPPING_ROUNDS = 100
+# Fração final (no tempo) do TREINO usada como validação do early stopping.
+VALIDATION_SIZE_FRACTION = 0.2
+
+# Baseline: só colunas numéricas com até este % de ausência no treino.
+BASELINE_MAX_MISSING_RATE = 0.5
+
+FEATURES_TRAIN_FILE = DATA_PROCESSED_DIR / "features_train.parquet"
+FEATURES_TEST_FILE = DATA_PROCESSED_DIR / "features_test.parquet"
 
 # --- Avaliação ---
 # Recall reportado a este FPR fixo, métrica de negócio relevante para fraude
