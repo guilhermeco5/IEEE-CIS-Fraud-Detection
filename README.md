@@ -18,7 +18,7 @@ O dataset não está incluído no repositório (ver `data/raw/README.md` para in
 
 ## Roadmap
 
-- [ ] **Semana 1 — EDA e limpeza.** Investigar padrões de valores ausentes, definir split temporal (não aleatório) usando `TransactionDT`.
+- [x] **Semana 1 — EDA e limpeza.** Investigar padrões de valores ausentes, definir split temporal (não aleatório) usando `TransactionDT`.
 - [ ] **Semana 2 — Feature engineering.** Features de velocidade/frequência por entidade, agregações, encoding de categóricas de alta cardinalidade.
 - [ ] **Semana 3 — Modelagem e avaliação.** Baseline (regressão logística) → XGBoost/LightGBM. Avaliação com PR-AUC e recall a FPR fixo, não acurácia.
 - [ ] **Semana 4 — Explicabilidade.** SHAP para importância de features por predição individual.

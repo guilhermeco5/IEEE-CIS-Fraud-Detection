@@ -23,7 +23,37 @@ Este documento registra as decisões técnicas do projeto e a justificativa por 
 
 ## 3. Engenharia de features
 
-*A preencher na Semana 2 — listar cada feature criada e a hipótese de negócio por trás dela.*
+Implementado em `src/features.py` (orquestrado por `build_features(train_df, test_df)`), testado em `tests/test_features.py`. São 20 colunas novas.
+
+### Decisões transversais
+
+- **Entidade = `card1`.** O dataset não tem ID de cliente. `card1` nunca é ausente (13.553 valores) e é a escolha mais simples. O custo conhecido é que ele mistura clientes distintos que compartilham o mesmo `card1` (o mais frequente tem 14.932 transações), o que enfraquece as features de velocidade. Um uid sintético (`card1` + `addr1` + dia − `D1`) foi considerado e deixado como possível melhoria.
+- **Só o passado estrito.** Toda feature de entidade de uma transação em `t` usa só transações com `TransactionDT < t`. A própria linha e os **empates de timestamp** ficam de fora: a ordem entre empates não é determinística (mesmo argumento do split, seção 1), então incluí-los tornaria a feature dependente de um detalhe arbitrário do sort. Há um teste dedicado (`test_no_lookahead_future_changes_do_not_affect_past`) verificando que alterar uma transação futura não muda nenhuma feature do passado.
+- **Treino e teste concatenados para velocidade e agregações.** Como cada linha só olha o passado, uma linha de teste usar o histórico do treino não é vazamento; é exatamente o que aconteceria em produção. O que **não** pode ver o teste é qualquer coisa ajustada (o encoder), e ele é ajustado só no treino.
+- **Implementação vetorizada.** Uma chave ordenada `entidade * BIG + tempo` e `np.searchsorted` respondem "quantas transações desta entidade antes de t" sem loop por grupo. Médias e desvios usam somas acumuladas. O pipeline completo, com o load, roda em cerca de 40s sobre as 590 mil linhas. Uma conferência contra um cálculo ingênuo, em 300 linhas do `card1` mais frequente, não teve nenhuma divergência.
+
+### Features e hipóteses
+
+| Feature | Hipótese de negócio |
+|---|---|
+| `card1_cnt_1h`, `_6h`, `_24h` | Fraude vem em rajadas: um cartão comprometido gera muitas transações em pouco tempo. |
+| `card1_secs_since_prev` | Mesma hipótese, sem depender de uma janela fixa. |
+| `card1_n_prev` | Cartões sem histórico (novos ou pouco usados) são mais arriscados e a agregação neles é menos confiável. |
+| `card1_amt_mean_prev`, `_std_prev`, `_max_prev` | Padrão histórico de gasto da entidade. |
+| `card1_amt_ratio_mean`, `card1_amt_zscore` | Uma transação muito acima do padrão histórico da entidade é um sinal de risco clássico. |
+| `{id_01, id_02, DeviceType, R_emaildomain}_is_missing`, `has_identity` | Sinal residual de ausência (seção 2). Entra junto com `ProductCD` categórica para a árvore aprender a interação. |
+| `{P_emaildomain, R_emaildomain, DeviceInfo, id_31, card1}_freq` | Categorias raras (domínio obscuro, dispositivo incomum) são mais suspeitas. |
+
+### Encoding de categóricas
+
+Usamos **frequency encoding** (frequência relativa entre os não-ausentes, ajustada só no treino; categoria nunca vista recebe 0 e ausente continua NaN), mais a coluna original como `category` para o suporte nativo do LightGBM/XGBoost. Target encoding foi descartado nesta etapa porque usa o rótulo: exigiria cálculo out-of-fold cuidadoso para não vazar `isFraud`, e o ganho esperado para modelos de árvore é pequeno.
+
+### Primeira leitura do sinal (treino, taxa de fraude por quintil)
+
+- `card1_secs_since_prev`: 5.16% no quintil mais curto contra 2.45% no mais longo. A hipótese de rajada se confirma.
+- `card1_amt_ratio_mean`: sobe de forma monotônica de cerca de 2.8% para 4.94% no quintil mais alto.
+- `card1_cnt_24h`: **não monotônico** (2.43%, 3.50%, 4.31%, 4.07%, 3.26%). A contagem alta vem de `card1` muito populares que agregam muitos clientes, e esse é justamente o custo de usar `card1` como entidade. Fica como evidência a favor de testar o uid na iteração seguinte.
+- `has_identity`: cerca de 8.6% com identidade contra cerca de 2% sem. Isso é em grande parte composição de `ProductCD` (seção 2), por isso a flag não entra sozinha.
 
 ## 4. Modelagem e tratamento de desbalanceamento
 

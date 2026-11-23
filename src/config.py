@@ -28,6 +28,23 @@ TEST_SIZE_FRACTION = 0.2  # últimos 20% no tempo vão para validação
 # --- Alvo ---
 TARGET_COLUMN = "isFraud"
 
+# --- Engenharia de features (Semana 2) ---
+# Entidade usada nas features de velocidade e agregação. `card1` nunca é
+# ausente; o custo é misturar clientes distintos que compartilham o mesmo
+# card1 (ver docs/metodologia.md, seção 3).
+ENTITY_COLUMN = "card1"
+AMOUNT_COLUMN = "TransactionAmt"
+ID_COLUMN = "TransactionID"
+
+# Janelas das features de velocidade, em segundos (1h, 6h, 24h).
+VELOCITY_WINDOWS_SECONDS = {"1h": 3_600, "6h": 21_600, "24h": 86_400}
+
+# Categóricas de alta cardinalidade com frequency encoding (fit só no treino).
+FREQ_ENCODE_COLUMNS = ["P_emaildomain", "R_emaildomain", "DeviceInfo", "id_31", "card1"]
+
+# Colunas que ganham flag binária `{col}_is_missing`.
+MISSING_FLAG_COLUMNS = ["id_01", "id_02", "DeviceType", "R_emaildomain"]
+
 # --- Modelagem ---
 RANDOM_STATE = 42
 
