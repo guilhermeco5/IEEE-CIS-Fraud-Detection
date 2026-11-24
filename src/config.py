@@ -76,6 +76,16 @@ XGBOOST_MODEL_FILE = MODELS_DIR / "xgboost.joblib"
 # amostra só limita tempo/memória (451 colunas x 118k linhas não cabe bem).
 SHAP_SAMPLE_SIZE = 20_000
 SHAP_TOP_N = 20
+# Features da Semana 2 com gráfico de dependência: uma por hipótese de negócio
+# (metodologia, seção 3). cnt_24h entra por ser a única com sinal não monotônico.
+SHAP_DEPENDENCE_FEATURES = [
+    "card1_freq",
+    "card1_amt_mean_prev",
+    "card1_amt_ratio_mean",
+    "card1_secs_since_prev",
+    "card1_cnt_24h",
+    "card1_n_prev",
+]
 
 # --- Avaliação ---
 # Recall reportado a este FPR fixo, métrica de negócio relevante para fraude

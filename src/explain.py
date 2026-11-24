@@ -38,13 +38,14 @@ from src.config import (
     ID_COLUMN,
     METRICS_DIR,
     RANDOM_STATE,
+    SHAP_DEPENDENCE_FEATURES,
     SHAP_SAMPLE_SIZE,
     SHAP_TOP_N,
     TARGET_FPR_FOR_RECALL,
     XGBOOST_MODEL_FILE,
 )
 from src.evaluate import recall_at_fpr
-from src.train import load_feature_data, make_xy
+from src.train import engineered_feature_columns, load_feature_data, make_xy
 
 BIAS_COLUMN = "__bias__"
 
@@ -110,6 +111,62 @@ def plot_global(explanation: shap.Explanation, top_n: int = SHAP_TOP_N) -> None:
         plt.tight_layout()
         plt.savefig(FIGURES_DIR / f"shap_{kind}_top{top_n}.png", dpi=150, bbox_inches="tight")
         plt.close("all")
+
+
+def group_share(importance: pd.Series, columns: list[str]) -> float:
+    """Fatia do |SHAP| médio total que vem de um grupo de colunas (0 a 1)."""
+    return float(importance[importance.index.isin(columns)].sum() / importance.sum())
+
+
+def binned_trend(x: pd.Series, shap_col: pd.Series, bins: int = 5) -> pd.DataFrame:
+    """SHAP médio por faixa (quantis) do valor da feature.
+
+    Resume numericamente o que o gráfico de dependência mostra: se o SHAP
+    sobe com a feature, se é monotônico ou não. Ausentes viram uma linha à
+    parte, porque "faltou" é informação para o XGBoost.
+    """
+    valid = x.notna()
+    bands = pd.qcut(x[valid], q=bins, duplicates="drop")
+    out = shap_col[valid].groupby(bands, observed=True).agg(n="size", shap_medio="mean")
+    out.insert(0, "x_mediano", x[valid].groupby(bands, observed=True).median())
+    out.index = out.index.astype(str)
+    if (~valid).any():
+        out.loc["ausente"] = [np.nan, int((~valid).sum()), shap_col[~valid].mean()]
+    out.index.name = "faixa"
+    return out
+
+
+def plot_dependence(shap_df: pd.DataFrame, X: pd.DataFrame, features: list[str]) -> None:
+    """SHAP x valor da feature, com a tendência por faixas de quantil por cima.
+
+    O eixo x é cortado nos percentis 1 e 99 e usa escala symlog, porque
+    contagens e tempos têm cauda longa que esmagaria o gráfico.
+    """
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    ncols = 3
+    nrows = -(-len(features) // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.8 * nrows), squeeze=False)
+    for ax, feature in zip(axes.ravel(), features):
+        x, s = X[feature].astype(float), shap_df[feature]
+        lo, hi = x.quantile([0.01, 0.99])
+        ax.scatter(x, s, s=3, alpha=0.15, color="#9aa5b1", rasterized=True)
+        trend = binned_trend(x, s, bins=20).dropna(subset=["x_mediano"])
+        ax.plot(trend["x_mediano"], trend["shap_medio"], color="#d62728", lw=2)
+        ax.axhline(0, color="black", lw=0.6)
+        # Região linear só até o 5º percentil dos positivos; senão uma feature
+        # em [0, 0.03] (card1_freq) ficaria toda dentro da faixa linear.
+        positive = x[x > 0]
+        ax.set_xscale("symlog", linthresh=float(positive.quantile(0.05)) if len(positive) else 1.0)
+        ax.set_xlim(lo, hi)
+        ax.set_title(feature)
+        ax.set_xlabel("valor da feature")
+        ax.set_ylabel("SHAP (log-odds)")
+    for ax in axes.ravel()[len(features):]:
+        ax.axis("off")
+    fig.suptitle("Features da Semana 2: SHAP por valor (linha vermelha = média por quantil)")
+    fig.tight_layout()
+    fig.savefig(FIGURES_DIR / "shap_dependence_semana2.png", dpi=150, bbox_inches="tight")
+    plt.close("all")
 
 
 def explain_transaction(model: xgb.XGBClassifier, row: pd.DataFrame, top_k: int = 10) -> pd.DataFrame:
@@ -213,6 +270,16 @@ def main() -> pd.DataFrame:
 
     print(f"\nTop {SHAP_TOP_N} (|SHAP| médio) x rank no gain:\n",
           table.head(SHAP_TOP_N).round(4).to_string(), sep="")
+
+    eng_cols = engineered_feature_columns(test_df)
+    importance = table["mean_abs_shap"]
+    share = group_share(importance, eng_cols)
+    print(f"\nFeatures da Semana 2: {len(eng_cols)} de {len(importance)} colunas, "
+          f"{share:.1%} do |SHAP| médio total")
+    plot_dependence(shap_df, X, SHAP_DEPENDENCE_FEATURES)
+    for feature in SHAP_DEPENDENCE_FEATURES:
+        print(f"\n{feature}: SHAP médio por quintil\n",
+              binned_trend(X[feature].astype(float), shap_df[feature]).round(4).to_string(), sep="")
 
     explain_cases(model, test_df)
     print(f"\nTotal: {time.perf_counter() - t0:.0f}s")

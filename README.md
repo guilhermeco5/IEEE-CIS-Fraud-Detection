@@ -2,7 +2,7 @@
 
 Pipeline de Machine Learning end-to-end para detecção de fraude em transações financeiras, com engenharia de features, avaliação sob desbalanceamento severo de classes, explicabilidade (SHAP) e serving via API containerizada.
 
-**Status:** em desenvolvimento, projeto pessoal de portfólio.
+**Status:** em desenvolvimento (semanas 1 a 4 concluídas: EDA, features, modelagem e explicabilidade), projeto pessoal de portfólio.
 
 ---
 
@@ -19,9 +19,9 @@ O dataset não está incluído no repositório (ver `data/raw/README.md` para in
 ## Roadmap
 
 - [x] **Semana 1: EDA e limpeza.** Investigar padrões de valores ausentes, definir split temporal (não aleatório) usando `TransactionDT`.
-- [ ] **Semana 2: Feature engineering.** Features de velocidade/frequência por entidade, agregações, encoding de categóricas de alta cardinalidade.
-- [ ] **Semana 3: Modelagem e avaliação.** Baseline (regressão logística) → XGBoost/LightGBM. Avaliação com PR-AUC e recall a FPR fixo, não acurácia.
-- [ ] **Semana 4: Explicabilidade.** SHAP para importância de features por predição individual.
+- [x] **Semana 2: Feature engineering.** Features de velocidade/frequência por entidade, agregações, encoding de categóricas de alta cardinalidade.
+- [x] **Semana 3: Modelagem e avaliação.** Baseline (regressão logística) → XGBoost/LightGBM. Avaliação com PR-AUC e recall a FPR fixo, não acurácia.
+- [x] **Semana 4: Explicabilidade.** SHAP para importância de features por predição individual.
 - [ ] **Semana 5: Serving.** API em FastAPI + Dockerfile.
 - [ ] **Semana 6: Deploy.** Deploy em Render/Railway + interface simples de demonstração.
 
@@ -40,12 +40,16 @@ fraud-detection/
 │   ├── preprocessing.py← limpeza, split temporal
 │   ├── features.py     ← engenharia de features
 │   ├── train.py        ← treino dos modelos
-│   └── evaluate.py     ← métricas e relatório de avaliação
+│   ├── evaluate.py     ← métricas e relatório de avaliação
+│   └── explain.py      ← explicabilidade com SHAP (global e por transação)
 ├── api/
 │   ├── app.py           ← API FastAPI para serving do modelo
 │   └── schemas.py       ← schemas de request/response (Pydantic)
 ├── tests/
-│   └── test_preprocessing.py
+│   ├── test_preprocessing.py
+│   ├── test_features.py
+│   ├── test_evaluate.py
+│   └── test_explain.py
 ├── models/              ← modelos treinados serializados (não versionado)
 ├── outputs/
 │   ├── figures/         ← gráficos gerados
@@ -65,7 +69,15 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Instruções de execução completas serão adicionadas a partir da Semana 1, conforme o pipeline for tomando forma.
+Com os dados baixados em `data/raw/` (ver `data/raw/README.md`):
+
+```bash
+python -m src.train      # features, baseline, XGBoost e ablação; salva modelos e métricas
+python -m src.explain    # SHAP global, gráficos de dependência e casos TP/FP/FN
+pytest                   # testes
+```
+
+`src.explain` usa o modelo salvo por `src.train`; não retreina.
 
 ## Métricas-alvo (a preencher conforme os resultados)
 

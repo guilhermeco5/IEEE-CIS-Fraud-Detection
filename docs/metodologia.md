@@ -99,7 +99,58 @@ Para referência, um classificador aleatório tem PR-AUC ≈ 0.034 (a taxa de fr
 
 ## 6. Explicabilidade
 
-*A preencher na Semana 4 — registrar os achados do SHAP: quais features mais pesam nas decisões do modelo, e se isso é consistente com a intuição de negócio.*
+Implementado em `src/explain.py` (`python -m src.explain`), testado em `tests/test_explain.py`. Roda sobre o modelo já salvo, sem retreinar.
+
+### Método
+
+- **TreeSHAP nativo do XGBoost** (`Booster.predict(..., pred_contribs=True)`), não o `shap.TreeExplainer`. O cálculo é exato e aceita as categóricas nativas (`enable_categorical`); a biblioteca `shap` entra só nos gráficos.
+- **Escala log-odds** (a margem do modelo). Para cada linha, `base + soma(SHAP) = margem`, e a sigmoide da margem reproduz o `predict_proba` com erro máximo de 1.5e-06 na amostra. Há testes de aditividade com colunas numéricas, categóricas e NaN.
+- **Amostra de 20.000 linhas do teste** (semente fixa, taxa de fraude natural de 3.59%) para o SHAP global. A amostra só limita tempo e memória; os casos individuais usam o teste inteiro.
+- **O valor base (0.222) e os scores não são probabilidades reais.** O `scale_pos_weight` (seção 4) desloca a margem, e por isso há scores de 0.0000 e 1.0000. A leitura útil é relativa: quem empurra o score para cima ou para baixo.
+
+### O que mais pesa
+
+Top 10 por |SHAP| médio: `C13`, `P_emaildomain`, `C1`, `TransactionAmt`, `C14`, `card6`, `card1_freq`, `card1`, `card1_amt_mean_prev`, `C11` (tabela completa, com o rank no gain, em `outputs/metrics/shap_importancia_global.csv`; gráficos em `outputs/figures/shap_bar_top20.png` e `shap_beeswarm_top20.png`).
+
+- **Consistente com a intuição:** o valor da transação, o e-mail do comprador, o tipo de cartão e o dispositivo estão entre os principais. As colunas `C*` são, segundo a descrição oficial da competição, contagens (por exemplo, de endereços associados ao cartão). No beeswarm, `C1` alto empurra para fraude e `C13`, `C14` e `D1` altos empurram para legítima, o que lê como "conta com histórico é mais confiável".
+- **Não interpretável:** a coluna `V*` (features de engenharia da Vesta) é anonimizada. `V70` e `V258` pesam muito, mas não dá para dizer o que medem. É uma limitação do dataset, não do método.
+
+### SHAP e gain discordam
+
+A correlação de Spearman entre os dois rankings é 0.72. As maiores diferenças: `V258` é a 1ª no gain (6.855) e a 36ª no SHAP; `V257` é a 3ª no gain e a 148ª no SHAP. O gain mede o quanto as divisões das árvores reduzem a perda no treino, e favorece features usadas em poucos splits muito úteis, em casos raros. O |SHAP| médio mede o efeito sobre o score em todas as transações. Para explicar o modelo ao negócio, o SHAP é a medida mais honesta; o gain fica como diagnóstico secundário.
+
+### Features da Semana 2
+
+- **Fatia pequena do total:** as 20 colunas respondem por **11.8% do |SHAP| médio**, e 6 delas têm contribuição desprezível (`*_is_missing`, `has_identity` e `R_emaildomain_freq`, todas abaixo de 0.004). É coerente com a ablação (PR-AUC 0.517 contra 0.522): ajudam pouco no agregado.
+- **Mas duas entram no top 10:** `card1_freq` (7ª) e `card1_amt_mean_prev` (9ª). Parte do que elas capturam o modelo já aprenderia de `card1` e `TransactionAmt`, o que explica o ganho pequeno apesar do peso individual.
+- **Gráficos de dependência** (`shap_dependence_semana2.png`) contra as hipóteses da seção 3:
+
+| Feature | Hipótese | O que o SHAP mostra |
+|---|---|---|
+| `card1_amt_ratio_mean` | valor acima do padrão é sinal de risco | **Confirmada.** SHAP sobe de -0.20 (quintil mais baixo) para +0.05 (mais alto) |
+| `card1_amt_mean_prev` | padrão histórico de gasto | SHAP sobe de -0.41 para +0.08; cartões com gasto histórico baixo são menos arriscados |
+| `card1_cnt_24h` | rajadas indicam fraude | **Não confirmada.** Fica em ~0 até 21 transações em 24h e cai para -0.15 acima disso. Bate com a não monotonicidade da seção 3: contagem alta vem de `card1` populares que agregam muitos clientes |
+| `card1_secs_since_prev` | rajadas indicam fraude | **Efeito quase nulo** (SHAP entre -0.06 e +0.02 nos quintis), apesar do sinal visto no treino na seção 3 (5.16% contra 2.45%). Uma explicação possível, não testada, é que as colunas `C*` já capturam esse padrão |
+| `card1_freq` | categoria rara é mais suspeita | **Direção oposta.** O quintil mais raro tem SHAP -0.33 (menos fraude). Nesse quintil estão os `card1` que não aparecem no treino (frequência 0). Não investigado |
+| `card1_n_prev` | cartão sem histórico é mais arriscado | **Não confirmada.** O SHAP é levemente negativo nos extremos (-0.07 no menor, -0.12 no maior), sem tendência clara |
+
+A leitura geral: de todas as hipóteses da Semana 2, só a de valor atípico se confirma com clareza no modelo. As de velocidade, que eram a aposta principal, ficaram fracas. Isso reforça a ideia da seção 3 de que `card1` é uma entidade ruim e de que um uid sintético é a melhoria mais promissora.
+
+### Leitura de três casos (limiar de FPR 1% = 0.7169)
+
+Figuras em `outputs/figures/shap_waterfall_{tp,fp,fn}.png`.
+
+- **Fraude detectada (score 1.0000):** o maior peso é o aparelho (`DeviceInfo` = SM-G920P, +3.12), seguido de `C1` = 86 (+1.77).
+- **Alarme falso (score 0.9995):** os mesmos sinais do acerto, `C1` alto (+1.47) e `V258` alto (+1.44). A única feature da Semana 2 relevante, `card1_amt_mean_prev` (-0.37), puxou para legítima mas não bastou. O modelo erra aqui pelos mesmos motivos pelos quais acerta, ou seja, não há como separar esse caso olhando só as features principais.
+- **Fraude não detectada (score ~0):** o perfil do dispositivo escondeu a fraude: resolução 1152x864 (-2.01), Firefox 52 (-1.94) e Windows Vista (-0.85), além de `D1`, `D8` e `D13` em torno de 208 (cartão com histórico). É uma configuração rara que o modelo associou a clientes legítimos.
+
+### Limitações
+
+- Features anonimizadas (`V*`, `C*`, `D*`, `M*`) impedem traduzir parte da explicação para o negócio.
+- Features correlacionadas (as colunas `V*` vêm em grupos) dividem o crédito entre si, então o |SHAP| de uma isolada subestima o grupo.
+- SHAP descreve o modelo, não a causa da fraude: "`C1` alto empurra o score" não significa que `C1` cause fraude.
+- Amostra de 20 mil linhas do teste e três casos individuais são ilustrativos, não uma auditoria. Os casos de FP e FN foram escolhidos como os extremos, não como os típicos.
+- As explicações valem para o período do teste; com o drift da seção 5, o ranking pode mudar após um retreino.
 
 ## 7. Serving e deploy
 
