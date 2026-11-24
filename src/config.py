@@ -87,6 +87,14 @@ SHAP_DEPENDENCE_FEATURES = [
     "card1_n_prev",
 ]
 
+# --- Serving (Semana 5) ---
+# Artefato com tudo que o modelo sozinho não carrega: ordem/dtypes das colunas,
+# categorias do treino, frequency encoder, histórico por cartão e limiares.
+SERVING_BUNDLE_FILE = MODELS_DIR / "serving_bundle.joblib"
+# Faixas de risco por limiar de FPR no teste: "alto" usa TARGET_FPR_FOR_RECALL
+# (o mesmo ponto de operação das métricas), "médio" este FPR maior.
+SERVING_MEDIUM_RISK_FPR = 0.05
+
 # --- Avaliação ---
 # Recall reportado a este FPR fixo, métrica de negócio relevante para fraude
 TARGET_FPR_FOR_RECALL = 0.01

@@ -21,16 +21,13 @@ Duas leituras:
 Uso: `python -m src.explain` (usa o modelo salvo por `python -m src.train`).
 """
 
+from __future__ import annotations
+
 import time
 
 import joblib
-import matplotlib
-
-matplotlib.use("Agg")  # sem janela: só salva PNG
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import shap
 import xgboost as xgb
 
 from src.config import (
@@ -44,10 +41,23 @@ from src.config import (
     TARGET_FPR_FOR_RECALL,
     XGBOOST_MODEL_FILE,
 )
-from src.evaluate import recall_at_fpr
-from src.train import engineered_feature_columns, load_feature_data, make_xy
 
 BIAS_COLUMN = "__bias__"
+
+
+def _plotting():
+    """Imports tardios de matplotlib e shap.
+
+    O serving (API) só usa `shap_values` e `explain_transaction`, que não
+    precisam deles; assim a imagem Docker da API dispensa shap/matplotlib.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")  # sem janela: só salva PNG
+    import matplotlib.pyplot as plt
+    import shap
+
+    return plt, shap
 
 
 def load_model(path=XGBOOST_MODEL_FILE) -> xgb.XGBClassifier:
@@ -93,6 +103,7 @@ def sample_rows(df: pd.DataFrame, n: int = SHAP_SAMPLE_SIZE, seed: int = RANDOM_
 
 
 def _to_explanation(shap_df: pd.DataFrame, base_value: float, X: pd.DataFrame) -> shap.Explanation:
+    _, shap = _plotting()
     # Categóricas viram código numérico só para a cor do beeswarm.
     data = X.apply(lambda s: s.cat.codes.where(s.notna()) if isinstance(s.dtype, pd.CategoricalDtype) else s)
     return shap.Explanation(
@@ -104,6 +115,7 @@ def _to_explanation(shap_df: pd.DataFrame, base_value: float, X: pd.DataFrame) -
 
 
 def plot_global(explanation: shap.Explanation, top_n: int = SHAP_TOP_N) -> None:
+    plt, shap = _plotting()
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     for kind, plot in [("bar", shap.plots.bar), ("beeswarm", shap.plots.beeswarm)]:
         plot(explanation, max_display=top_n + 1, show=False)  # +1: a linha "soma das outras"
@@ -142,6 +154,7 @@ def plot_dependence(shap_df: pd.DataFrame, X: pd.DataFrame, features: list[str])
     O eixo x é cortado nos percentis 1 e 99 e usa escala symlog, porque
     contagens e tempos têm cauda longa que esmagaria o gráfico.
     """
+    plt, _ = _plotting()
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     ncols = 3
     nrows = -(-len(features) // ncols)
@@ -169,23 +182,28 @@ def plot_dependence(shap_df: pd.DataFrame, X: pd.DataFrame, features: list[str])
     plt.close("all")
 
 
-def explain_transaction(model: xgb.XGBClassifier, row: pd.DataFrame, top_k: int = 10) -> pd.DataFrame:
-    """As `top_k` contribuições SHAP de maior |SHAP| para UMA transação.
-
-    `row` é um DataFrame de uma linha, no mesmo formato do treino. Sinal
-    positivo empurra o score para fraude; negativo, para legítima. Pensado
-    para ser reaproveitado no `/predict` da API (Semana 5).
-    """
-    if len(row) != 1:
-        raise ValueError(f"esperava 1 linha, recebi {len(row)}")
-    shap_df, _ = shap_values(model, row)
-    contrib = shap_df.iloc[0]
+def top_contributions(contrib: pd.Series, row: pd.DataFrame, top_k: int = 10) -> pd.DataFrame:
+    """As `top_k` maiores contribuições (em |SHAP|) de uma linha, com o valor da feature."""
     order = contrib.abs().sort_values(ascending=False).index[:top_k]
     return pd.DataFrame({
         "feature": order,
         "valor": [row.iloc[0][f] for f in order],
         "shap": contrib[order].to_numpy(),
     })
+
+
+def explain_transaction(model: xgb.XGBClassifier, row: pd.DataFrame, top_k: int = 10) -> pd.DataFrame:
+    """As `top_k` contribuições SHAP de maior |SHAP| para UMA transação.
+
+    `row` é um DataFrame de uma linha, no mesmo formato do treino. Sinal
+    positivo empurra o score para fraude; negativo, para legítima. Usada
+    pela API (`src/serving.py`), que chama `top_contributions` direto para
+    reaproveitar o mesmo DMatrix da predição.
+    """
+    if len(row) != 1:
+        raise ValueError(f"esperava 1 linha, recebi {len(row)}")
+    shap_df, _ = shap_values(model, row)
+    return top_contributions(shap_df.iloc[0], row, top_k)
 
 
 def select_cases(y_true: pd.Series, proba: pd.Series, threshold: float) -> dict[str, object]:
@@ -205,6 +223,7 @@ def select_cases(y_true: pd.Series, proba: pd.Series, threshold: float) -> dict[
 
 
 def plot_waterfall(shap_row: pd.Series, base_value: float, x_row: pd.Series, title: str, path) -> None:
+    plt, shap = _plotting()
     explanation = shap.Explanation(
         values=shap_row.to_numpy(),
         base_values=base_value,
@@ -226,6 +245,9 @@ CASE_LABELS = {
 
 def explain_cases(model: xgb.XGBClassifier, test_df: pd.DataFrame, top_k: int = 10) -> dict[str, pd.DataFrame]:
     """Escolhe TP/FP/FN no limiar de FPR 1% do teste inteiro e explica cada um."""
+    from src.evaluate import recall_at_fpr
+    from src.train import make_xy
+
     X, y = make_xy(test_df)
     proba = pd.Series(model.predict_proba(X)[:, 1], index=X.index)
     _, threshold = recall_at_fpr(y, proba)
@@ -246,6 +268,8 @@ def explain_cases(model: xgb.XGBClassifier, test_df: pd.DataFrame, top_k: int = 
 
 
 def main() -> pd.DataFrame:
+    from src.train import engineered_feature_columns, load_feature_data, make_xy
+
     t0 = time.perf_counter()
     model = load_model()
     _, test_df = load_feature_data()
