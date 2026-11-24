@@ -12,6 +12,12 @@ A margem já inclui o deslocamento do `scale_pos_weight`, então o
 base_value não é a taxa de fraude real; a leitura útil é a relativa
 (quem empurra o score para cima ou para baixo).
 
+Duas leituras:
+  - global: |SHAP| médio numa amostra do teste, comparado com o gain;
+  - local: por que o modelo deu aquele score para UMA transação
+    (`explain_transaction`), ilustrado com um acerto, um alarme falso e
+    uma fraude perdida no limiar de FPR 1%.
+
 Uso: `python -m src.explain` (usa o modelo salvo por `python -m src.train`).
 """
 
@@ -29,12 +35,15 @@ import xgboost as xgb
 
 from src.config import (
     FIGURES_DIR,
+    ID_COLUMN,
     METRICS_DIR,
     RANDOM_STATE,
     SHAP_SAMPLE_SIZE,
     SHAP_TOP_N,
+    TARGET_FPR_FOR_RECALL,
     XGBOOST_MODEL_FILE,
 )
+from src.evaluate import recall_at_fpr
 from src.train import load_feature_data, make_xy
 
 BIAS_COLUMN = "__bias__"
@@ -103,13 +112,88 @@ def plot_global(explanation: shap.Explanation, top_n: int = SHAP_TOP_N) -> None:
         plt.close("all")
 
 
+def explain_transaction(model: xgb.XGBClassifier, row: pd.DataFrame, top_k: int = 10) -> pd.DataFrame:
+    """As `top_k` contribuições SHAP de maior |SHAP| para UMA transação.
+
+    `row` é um DataFrame de uma linha, no mesmo formato do treino. Sinal
+    positivo empurra o score para fraude; negativo, para legítima. Pensado
+    para ser reaproveitado no `/predict` da API (Semana 5).
+    """
+    if len(row) != 1:
+        raise ValueError(f"esperava 1 linha, recebi {len(row)}")
+    shap_df, _ = shap_values(model, row)
+    contrib = shap_df.iloc[0]
+    order = contrib.abs().sort_values(ascending=False).index[:top_k]
+    return pd.DataFrame({
+        "feature": order,
+        "valor": [row.iloc[0][f] for f in order],
+        "shap": contrib[order].to_numpy(),
+    })
+
+
+def select_cases(y_true: pd.Series, proba: pd.Series, threshold: float) -> dict[str, object]:
+    """Índice de um caso de cada tipo, no limiar de decisão dado.
+
+    tp: fraude com o maior score (o modelo mais seguro e certo).
+    fp: legítima com o maior score (o alarme falso mais confiante).
+    fn: fraude com o menor score (a fraude mais "invisível" ao modelo).
+    """
+    flagged = proba >= threshold
+    fraud = y_true == 1
+    return {
+        "tp": proba[fraud & flagged].idxmax(),
+        "fp": proba[~fraud & flagged].idxmax(),
+        "fn": proba[fraud & ~flagged].idxmin(),
+    }
+
+
+def plot_waterfall(shap_row: pd.Series, base_value: float, x_row: pd.Series, title: str, path) -> None:
+    explanation = shap.Explanation(
+        values=shap_row.to_numpy(),
+        base_values=base_value,
+        data=x_row.to_numpy(dtype=object),  # mantém o texto das categóricas
+        feature_names=list(shap_row.index),
+    )
+    shap.plots.waterfall(explanation, max_display=12, show=False)
+    plt.title(title)
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close("all")
+
+
+CASE_LABELS = {
+    "tp": "Fraude detectada (verdadeiro positivo)",
+    "fp": "Alarme falso (falso positivo)",
+    "fn": "Fraude não detectada (falso negativo)",
+}
+
+
+def explain_cases(model: xgb.XGBClassifier, test_df: pd.DataFrame, top_k: int = 10) -> dict[str, pd.DataFrame]:
+    """Escolhe TP/FP/FN no limiar de FPR 1% do teste inteiro e explica cada um."""
+    X, y = make_xy(test_df)
+    proba = pd.Series(model.predict_proba(X)[:, 1], index=X.index)
+    _, threshold = recall_at_fpr(y, proba)
+    cases = select_cases(y, proba, threshold)
+    print(f"\nLimiar a FPR {TARGET_FPR_FOR_RECALL:.0%}: {threshold:.4f}")
+
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    tables = {}
+    for kind, idx in cases.items():
+        row = X.loc[[idx]]
+        shap_df, base_value = shap_values(model, row)
+        title = f"{CASE_LABELS[kind]}: score {proba[idx]:.4f}"
+        plot_waterfall(shap_df.iloc[0], base_value, row.iloc[0], title, FIGURES_DIR / f"shap_waterfall_{kind}.png")
+        tables[kind] = explain_transaction(model, row, top_k)
+        print(f"\n{title} (TransactionID {test_df.loc[idx, ID_COLUMN]})\n",
+              tables[kind].round(4).to_string(index=False), sep="")
+    return tables
+
+
 def main() -> pd.DataFrame:
     t0 = time.perf_counter()
     model = load_model()
     _, test_df = load_feature_data()
     sample = sample_rows(test_df)
     X, y = make_xy(sample)
-    del test_df
 
     shap_df, base_value = shap_values(model, X)
     print(f"SHAP em {len(X)} linhas x {X.shape[1]} features "
@@ -129,6 +213,8 @@ def main() -> pd.DataFrame:
 
     print(f"\nTop {SHAP_TOP_N} (|SHAP| médio) x rank no gain:\n",
           table.head(SHAP_TOP_N).round(4).to_string(), sep="")
+
+    explain_cases(model, test_df)
     print(f"\nTotal: {time.perf_counter() - t0:.0f}s")
     return table
 
