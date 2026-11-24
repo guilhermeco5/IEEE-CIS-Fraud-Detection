@@ -70,6 +70,13 @@ BASELINE_MAX_MISSING_RATE = 0.5
 FEATURES_TRAIN_FILE = DATA_PROCESSED_DIR / "features_train.parquet"
 FEATURES_TEST_FILE = DATA_PROCESSED_DIR / "features_test.parquet"
 
+# --- Explicabilidade (Semana 4) ---
+XGBOOST_MODEL_FILE = MODELS_DIR / "xgboost.joblib"
+# Amostra aleatória do teste usada no SHAP global. O TreeSHAP é exato; a
+# amostra só limita tempo/memória (451 colunas x 118k linhas não cabe bem).
+SHAP_SAMPLE_SIZE = 20_000
+SHAP_TOP_N = 20
+
 # --- Avaliação ---
 # Recall reportado a este FPR fixo, métrica de negócio relevante para fraude
 TARGET_FPR_FOR_RECALL = 0.01

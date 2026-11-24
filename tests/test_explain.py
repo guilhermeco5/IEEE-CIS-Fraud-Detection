@@ -1,0 +1,64 @@
+"""Testes da explicabilidade (SHAP nativo do XGBoost)."""
+
+import numpy as np
+import pandas as pd
+import pytest
+from xgboost import XGBClassifier
+
+from src.explain import compare_with_gain, global_importance, sample_rows, shap_values
+
+
+@pytest.fixture(scope="module")
+def model_and_data():
+    rng = np.random.default_rng(0)
+    n = 600
+    X = pd.DataFrame({
+        "forte": rng.normal(size=n),
+        "fraca": rng.normal(size=n),
+        "ruido": rng.normal(size=n),
+        "cat": pd.Categorical(rng.choice(["a", "b", "c"], size=n)),
+    })
+    X.loc[rng.random(n) < 0.1, "fraca"] = np.nan  # NaN também precisa funcionar
+    logit = 2.5 * X["forte"] + 0.5 * X["fraca"].fillna(0) + (X["cat"] == "c") * 1.0
+    y = (rng.random(n) < 1 / (1 + np.exp(-logit))).astype(int)
+    model = XGBClassifier(n_estimators=40, max_depth=3, tree_method="hist",
+                          enable_categorical=True, random_state=0)
+    model.fit(X, y)
+    return model, X
+
+
+def test_shap_is_additive_to_margin(model_and_data):
+    model, X = model_and_data
+    shap_df, base = shap_values(model, X)
+    margin = model.predict(X, output_margin=True)
+    np.testing.assert_allclose(base + shap_df.sum(axis=1), margin, atol=1e-4)
+
+
+def test_shap_shape_and_columns(model_and_data):
+    model, X = model_and_data
+    shap_df, _ = shap_values(model, X)
+    assert shap_df.shape == X.shape
+    assert list(shap_df.columns) == list(X.columns)
+    assert shap_df.index.equals(X.index)
+
+
+def test_global_importance_ranks_strong_feature_first(model_and_data):
+    model, X = model_and_data
+    imp = global_importance(shap_values(model, X)[0])
+    assert imp.index[0] == "forte"
+    assert imp.is_monotonic_decreasing
+
+
+def test_compare_with_gain_handles_unused_feature():
+    imp = pd.Series({"a": 0.5, "b": 0.3, "c": 0.0}, name="mean_abs_shap")
+    gain = pd.Series({"b": 10.0, "a": 5.0})  # "c" nunca foi usada num split
+    table = compare_with_gain(imp, gain)
+    assert table.loc["a", "rank_shap"] == 1 and table.loc["a", "rank_gain"] == 2
+    assert table.loc["c", "gain"] == 0 and np.isnan(table.loc["c", "rank_gain"])
+
+
+def test_sample_rows_is_reproducible():
+    df = pd.DataFrame({"x": range(100)})
+    a, b = sample_rows(df, n=10, seed=1), sample_rows(df, n=10, seed=1)
+    assert a.equals(b) and len(a) == 10
+    assert sample_rows(df, n=1000) is df

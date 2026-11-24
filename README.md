@@ -2,28 +2,28 @@
 
 Pipeline de Machine Learning end-to-end para detecção de fraude em transações financeiras, com engenharia de features, avaliação sob desbalanceamento severo de classes, explicabilidade (SHAP) e serving via API containerizada.
 
-**Status:** em desenvolvimento — projeto pessoal de portfólio.
+**Status:** em desenvolvimento, projeto pessoal de portfólio.
 
 ---
 
 ## Problema
 
-Detecção de fraude é um problema de classificação binária com desbalanceamento extremo de classes (tipicamente <5% de transações fraudulentas). O objetivo não é maximizar acurácia — um modelo que sempre prevê "não fraude" já acerta >95% e é inútil — mas maximizar a detecção de fraude (recall) mantendo o custo operacional de falsos positivos (que bloqueiam transações legítimas) em um nível aceitável para o negócio.
+Detecção de fraude é um problema de classificação binária com desbalanceamento extremo de classes (tipicamente <5% de transações fraudulentas). O objetivo não é maximizar acurácia (um modelo que sempre prevê "não fraude" já acerta >95% e é inútil), mas maximizar a detecção de fraude (recall) mantendo o custo operacional de falsos positivos (que bloqueiam transações legítimas) em um nível aceitável para o negócio.
 
 ## Dataset
 
-[IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) (Kaggle) — ~590 mil transações reais anonimizadas, com colunas categóricas e numéricas, valores ausentes informativos e desbalanceamento de ~3.5% de fraude.
+[IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) (Kaggle): ~590 mil transações reais anonimizadas, com colunas categóricas e numéricas, valores ausentes informativos e desbalanceamento de ~3.5% de fraude.
 
 O dataset não está incluído no repositório (ver `data/raw/README.md` para instruções de download).
 
 ## Roadmap
 
-- [x] **Semana 1 — EDA e limpeza.** Investigar padrões de valores ausentes, definir split temporal (não aleatório) usando `TransactionDT`.
-- [ ] **Semana 2 — Feature engineering.** Features de velocidade/frequência por entidade, agregações, encoding de categóricas de alta cardinalidade.
-- [ ] **Semana 3 — Modelagem e avaliação.** Baseline (regressão logística) → XGBoost/LightGBM. Avaliação com PR-AUC e recall a FPR fixo, não acurácia.
-- [ ] **Semana 4 — Explicabilidade.** SHAP para importância de features por predição individual.
-- [ ] **Semana 5 — Serving.** API em FastAPI + Dockerfile.
-- [ ] **Semana 6 — Deploy.** Deploy em Render/Railway + interface simples de demonstração.
+- [x] **Semana 1: EDA e limpeza.** Investigar padrões de valores ausentes, definir split temporal (não aleatório) usando `TransactionDT`.
+- [ ] **Semana 2: Feature engineering.** Features de velocidade/frequência por entidade, agregações, encoding de categóricas de alta cardinalidade.
+- [ ] **Semana 3: Modelagem e avaliação.** Baseline (regressão logística) → XGBoost/LightGBM. Avaliação com PR-AUC e recall a FPR fixo, não acurácia.
+- [ ] **Semana 4: Explicabilidade.** SHAP para importância de features por predição individual.
+- [ ] **Semana 5: Serving.** API em FastAPI + Dockerfile.
+- [ ] **Semana 6: Deploy.** Deploy em Render/Railway + interface simples de demonstração.
 
 ## Estrutura do projeto
 
