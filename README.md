@@ -1,65 +1,33 @@
 # Detecção de Fraude em Transações Financeiras
 
-Pipeline de Machine Learning end-to-end para detecção de fraude em transações financeiras, com engenharia de features, avaliação sob desbalanceamento severo de classes, explicabilidade (SHAP) e serving via API containerizada.
+Pipeline de Machine Learning end-to-end para detecção de fraude no dataset IEEE-CIS: split temporal, features de velocidade sem vazamento, avaliação sob desbalanceamento severo, explicabilidade com SHAP e serving com paridade treino/serving verificada.
 
-**Status:** em desenvolvimento (semanas 1 a 4 concluídas: EDA, features, modelagem e explicabilidade), projeto pessoal de portfólio.
+> **Em 30 segundos**
+> - **Resultado:** XGBoost detecta **43.9% das fraudes bloqueando no máximo 1% dos clientes legítimos** (PR-AUC 0.522, contra 0.034 de um classificador aleatório).
+> - **Avaliação honesta:** split temporal (o teste é o "futuro"), métrica de negócio (recall @ FPR 1%) em vez de acurácia, e a queda de desempenho por semana medida (~50% → ~39% de recall), o que indica *drift*.
+> - **Status:** Semanas 1–4 concluídas; Semana 5 (serving) em andamento. Projeto pessoal de portfólio.
 
 ---
 
-## Problema
+## Resultados
 
-Detecção de fraude é um problema de classificação binária com desbalanceamento extremo de classes (tipicamente <5% de transações fraudulentas). O objetivo não é maximizar acurácia (um modelo que sempre prevê "não fraude" já acerta >95% e é inútil), mas maximizar a detecção de fraude (recall) mantendo o custo operacional de falsos positivos (que bloqueiam transações legítimas) em um nível aceitável para o negócio.
+Teste temporal: os últimos 20% das transações (118.108 linhas, 3.44% de fraude).
 
-## Dataset
+| Modelo | PR-AUC | ROC-AUC | Recall @ FPR 1% | Observações |
+|---|---|---|---|---|
+| Regressão Logística (baseline) | 0.138 | 0.814 | 0.6% | quebra com valores fora da faixa do treino |
+| XGBoost sem features da Semana 2 | 0.517 | 0.888 | 43.2% | ablação, 431 colunas |
+| **XGBoost** | **0.522** | **0.890** | **43.9%** | 451 colunas, 1.469 árvores |
 
-[IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) (Kaggle): ~590 mil transações reais anonimizadas, com colunas categóricas e numéricas, valores ausentes informativos e desbalanceamento de ~3.5% de fraude.
+Fonte: [`outputs/metrics/comparacao_modelos.csv`](outputs/metrics/comparacao_modelos.csv). Análise completa em [`docs/metodologia.md`, seção 5](docs/metodologia.md#5-métricas-de-avaliação).
 
-O dataset não está incluído no repositório (ver `data/raw/README.md` para instruções de download).
+## Principais achados
 
-## Roadmap
-
-- [x] **Semana 1: EDA e limpeza.** Investigar padrões de valores ausentes, definir split temporal (não aleatório) usando `TransactionDT`.
-- [x] **Semana 2: Feature engineering.** Features de velocidade/frequência por entidade, agregações, encoding de categóricas de alta cardinalidade.
-- [x] **Semana 3: Modelagem e avaliação.** Baseline (regressão logística) → XGBoost/LightGBM. Avaliação com PR-AUC e recall a FPR fixo, não acurácia.
-- [x] **Semana 4: Explicabilidade.** SHAP para importância de features por predição individual.
-- [ ] **Semana 5: Serving.** API em FastAPI + Dockerfile.
-- [ ] **Semana 6: Deploy.** Deploy em Render/Railway + interface simples de demonstração.
-
-## Estrutura do projeto
-
-```
-fraud-detection/
-├── data/
-│   ├── raw/            ← dataset original (não versionado, ver README local)
-│   └── processed/      ← dados após limpeza e split temporal
-├── notebooks/
-│   └── 01_eda.ipynb    ← exploração inicial
-├── src/
-│   ├── config.py       ← caminhos e parâmetros centrais
-│   ├── data_loader.py  ← carregamento dos dados
-│   ├── preprocessing.py← limpeza, split temporal
-│   ├── features.py     ← engenharia de features
-│   ├── train.py        ← treino dos modelos
-│   ├── evaluate.py     ← métricas e relatório de avaliação
-│   └── explain.py      ← explicabilidade com SHAP (global e por transação)
-├── api/
-│   ├── app.py           ← API FastAPI para serving do modelo
-│   └── schemas.py       ← schemas de request/response (Pydantic)
-├── tests/
-│   ├── test_preprocessing.py
-│   ├── test_features.py
-│   ├── test_evaluate.py
-│   └── test_explain.py
-├── models/              ← modelos treinados serializados (não versionado)
-├── outputs/
-│   ├── figures/         ← gráficos gerados
-│   └── metrics/         ← métricas salvas
-├── docs/
-│   └── metodologia.md   ← decisões técnicas documentadas
-├── Dockerfile
-├── requirements.txt
-└── .gitignore
-```
+1. **Acurácia engana.** Com ~3.5% de fraude, prever sempre "legítima" acerta mais de 96% e não detecta nada. Por isso as métricas são PR-AUC e recall a FPR fixo de 1%.
+2. **O modelo envelhece.** O recall cai de ~51% na primeira semana do teste para ~35–40% a partir da semana 23, sem queda na taxa de fraude. Em produção, isso pede retreino periódico e monitoramento semanal ([`xgboost_por_semana.csv`](outputs/metrics/xgboost_por_semana.csv)).
+3. **As features de velocidade ajudam pouco.** O ganho é de +0.005 em PR-AUC sobre a ablação. As colunas originais (`V*`, `C*`) já capturam boa parte do sinal, e `card1` é uma entidade grossa demais. Um uid sintético é a melhoria de features mais promissora.
+4. **SHAP e gain discordam** (Spearman 0.72). `V258` é a 1ª no gain e a 36ª no SHAP. Para explicar o modelo ao negócio, o SHAP é a medida mais honesta.
+5. **Os erros têm explicação.** Um alarme falso usa os mesmos sinais de um acerto (`C1` e `V258` altos). Uma fraude não detectada se escondeu atrás de um perfil de dispositivo raro associado a clientes legítimos ([seção 6](docs/metodologia.md#6-explicabilidade)).
 
 ## Como rodar
 
@@ -69,26 +37,84 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Com os dados baixados em `data/raw/` (ver `data/raw/README.md`):
+Baixe os dados em `data/raw/` (instruções em [`data/raw/README.md`](data/raw/README.md); exige conta no Kaggle). Depois:
 
 ```bash
-python -m src.train      # features, baseline, XGBoost e ablação; salva modelos e métricas
-python -m src.explain    # SHAP global, gráficos de dependência e casos TP/FP/FN
-pytest                   # testes
+python -m src.train              # features, baseline, XGBoost e ablação; salva modelos e métricas
+python -m src.train --no-ablation  # mesmo, sem o XGBoost de ablação (mais rápido)
+python -m src.explain            # SHAP global, dependência e casos TP/FP/FN (usa o modelo salvo)
+python -m src.serving            # gera o bundle de serving a partir do modelo salvo
+python -m src.serving --check    # confere que o serving reproduz as features do batch
+pytest                           # testes
 ```
 
-`src.explain` usa o modelo salvo por `src.train`; não retreina.
+## Em andamento
 
-## Métricas-alvo (a preencher conforme os resultados)
+**Semana 5: Serving**
+- [x] Núcleo de serving (`src/serving.py`) reutilizando as funções de `src/features.py`, com checagem de paridade treino/serving nos dados reais
+- [ ] Ligar `api/app.py` ao `src/serving.py` (o endpoint `/predict` ainda levanta `NotImplementedError`)
+- [ ] Completar os schemas de request em `api/schemas.py`
+- [ ] Documentar as decisões em `docs/metodologia.md`, seção 7
 
-Teste temporal (últimos 20%, 118.108 transações, 3.44% de fraude). Detalhes em `docs/metodologia.md`, seção 5.
+**Semana 6: Deploy**
+- [ ] Deploy em Render/Railway
+- [ ] Interface simples de demonstração
 
-| Modelo | PR-AUC | ROC-AUC | Recall @ FPR 1% | Observações |
-|---|---|---|---|---|
-| Regressão Logística (baseline) | 0.138 | 0.814 | 0.6% | 213 colunas numéricas; quebra com outliers fora da faixa do treino |
-| XGBoost sem features da Semana 2 | 0.517 | 0.888 | 43.2% | ablação, 431 colunas |
-| **XGBoost** | **0.522** | **0.890** | **43.9%** | 451 colunas, 1.469 árvores |
+**Melhorias anotadas**
+- uid sintético (`card1` + `addr1` + dia − `D1`) no lugar de `card1` como entidade
+- Fixar o limiar de decisão na validação, não no teste
+- Medir a variância (bootstrap/sementes) antes de afirmar ganhos pequenos
+- Limitar outliers no baseline (`log1p` / `QuantileTransformer`)
+
+## Mapa do repositório
+
+**Código**
+
+| Caminho | Papel |
+|---|---|
+| `src/config.py` | caminhos e parâmetros centrais |
+| `src/data_loader.py` | carregamento e join transaction + identity |
+| `src/preprocessing.py` | limpeza e split temporal |
+| `src/features.py` | engenharia de features (só passado estrito) |
+| `src/train.py` | baseline, XGBoost e ablação |
+| `src/evaluate.py` | métricas e avaliação por semana |
+| `src/explain.py` | SHAP global e por transação |
+| `src/serving.py` | scoring de uma transação com as mesmas features do treino |
+| `api/` | API FastAPI (`app.py`) e schemas Pydantic (`schemas.py`) |
+| `tests/` | testes de preprocessing, features, avaliação, explicabilidade e serving |
+| `Dockerfile` | imagem da API |
+
+**Referência**
+
+| Caminho | Conteúdo |
+|---|---|
+| [`docs/metodologia.md`](docs/metodologia.md) | todas as decisões técnicas e o porquê de cada uma |
+| [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb) | exploração inicial |
+| [`data/raw/README.md`](data/raw/README.md) | como baixar o dataset |
+
+**Gerado pelo pipeline** (só as métricas finais são versionadas)
+
+| Caminho | Conteúdo |
+|---|---|
+| `outputs/metrics/` | comparação de modelos, desempenho por semana, importâncias SHAP e gain |
+| `outputs/figures/` | gráficos SHAP e de avaliação (não versionados) |
+| `models/` | modelos e bundle de serving (não versionados) |
+| `data/processed/` | dados após limpeza e split (não versionados) |
+
+## Dataset
+
+[IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) (Kaggle): 590.540 transações reais anonimizadas, 434 colunas após o join, valores ausentes informativos e 3.50% de fraude. O dataset não está no repositório.
+
+<details>
+<summary><strong>Concluído: Semanas 1–4</strong></summary>
+
+- **Semana 1: EDA e limpeza.** Padrões de valores ausentes e split temporal (não aleatório) por `TransactionDT`.
+- **Semana 2: Feature engineering.** 20 features novas: velocidade e frequência por `card1`, agregações de valor, flags de ausência e frequency encoding de categóricas de alta cardinalidade.
+- **Semana 3: Modelagem e avaliação.** Baseline (regressão logística) → XGBoost, com ablação das features da Semana 2. PR-AUC e recall a FPR fixo, por semana do teste.
+- **Semana 4: Explicabilidade.** SHAP global, gráficos de dependência e leitura de três casos (acerto, alarme falso e fraude não detectada).
+
+</details>
 
 ## Licença
 
-MIT
+[MIT](LICENSE)
