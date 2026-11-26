@@ -2,55 +2,83 @@
 
 Roda com: uvicorn api.app:app --reload
 Docs interativas automáticas em /docs (Swagger UI gerado pelo FastAPI).
+
+Pré-requisito: `python -m src.train` e `python -m src.serving` (geram o modelo
+e o bundle em models/). Toda a lógica de features vive em `src/serving.py`.
 """
 
-from pathlib import Path
+from contextlib import asynccontextmanager
+from dataclasses import asdict
 
-import joblib
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 from api.schemas import FraudPrediction, TransactionRequest
-from src.config import MODELS_DIR
+from src.serving import FraudScorer
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Carrega modelo e bundle uma vez. Se faltarem, a API sobe e responde 503 com o motivo."""
+    app.state.scorer, app.state.load_error = None, None
+    try:
+        app.state.scorer = FraudScorer.load()
+    except FileNotFoundError as exc:
+        app.state.load_error = str(exc)
+    yield
+
 
 app = FastAPI(
     title="API de Detecção de Fraude",
-    description="Scoring de risco de fraude em transações financeiras.",
-    version="0.1.0",
+    description="Scoring de risco de fraude em transações financeiras (IEEE-CIS), com explicação SHAP.",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
-MODEL_PATH = MODELS_DIR / "xgboost_fraud_model.joblib"
-_model = None  # carregado em memória sob demanda, ver get_model()
 
-
-def get_model():
-    """Carrega o modelo serializado uma única vez (lazy loading)."""
-    global _model
-    if _model is None:
-        if not MODEL_PATH.exists():
-            raise HTTPException(
-                status_code=503,
-                detail=f"Modelo não encontrado em {MODEL_PATH}. Treine o modelo primeiro (src/train.py).",
-            )
-        _model = joblib.load(MODEL_PATH)
-    return _model
+def get_scorer(request: Request) -> FraudScorer:
+    scorer = request.app.state.scorer
+    if scorer is None:
+        raise HTTPException(status_code=503, detail=request.app.state.load_error)
+    return scorer
 
 
 @app.get("/health")
-def health_check():
-    """Endpoint de saúde da API — útil para o Render/Railway verificarem se o serviço está de pé."""
-    return {"status": "ok", "model_loaded": MODEL_PATH.exists()}
+def health_check(request: Request):
+    """Estado do serviço (para o Render/Railway/Docker). 503 se o modelo não carregou."""
+    scorer = request.app.state.scorer
+    if scorer is None:
+        raise HTTPException(status_code=503, detail=request.app.state.load_error)
+    return {
+        "status": "ok",
+        "model_loaded": True,
+        "cards_in_history": scorer.history.n_cards,
+        "transactions_in_history": scorer.history.n_transactions,
+    }
 
 
 @app.post("/predict", response_model=FraudPrediction)
-def predict(transaction: TransactionRequest):
-    """Recebe os dados de uma transação e retorna a probabilidade de fraude.
+def predict(
+    transaction: TransactionRequest,
+    record: bool = True,
+    scorer: FraudScorer = Depends(get_scorer),
+):
+    """Pontua uma transação e explica o score com as 5 features que mais pesaram.
 
-    TODO (Semana 5): aplicar o mesmo pipeline de features usado no
-    treino (src/features.py) antes de chamar model.predict_proba.
+    Com `record=true` (padrão) a transação entra no histórico do cartão e passa a
+    contar nas features de velocidade e agregação das próximas. Use `record=false`
+    para só consultar, sem alterar o estado. O histórico vive na memória do
+    processo (ver docs/metodologia.md, seção 7).
+
+    É uma função síncrona de propósito: o cálculo é CPU-bound e o FastAPI o executa
+    numa thread, sem travar o event loop.
     """
-    model = get_model()  # noqa: F841 — usado quando a lógica de features estiver pronta
-
-    raise NotImplementedError(
-        "Implementar transformação de features + predict_proba na Semana 5, "
-        "reaproveitando exatamente a mesma lógica de src/features.py usada no treino."
+    result = scorer.score(
+        transaction_dt=transaction.transaction_dt,
+        transaction_amt=transaction.transaction_amt,
+        card1=transaction.card1,
+        product_cd=transaction.product_cd,
+        features=transaction.features,
+        transaction_id=transaction.transaction_id,
+        record=record,
     )
+    return FraudPrediction(**asdict(result))
