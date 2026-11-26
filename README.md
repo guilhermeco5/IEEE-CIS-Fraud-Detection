@@ -50,7 +50,7 @@ pytest                           # testes
 
 ### API de scoring e demonstração
 
-O repositório já traz o modelo e um bundle de demonstração, então a API roda a partir de um clone, **sem baixar o dataset**:
+O repositório já traz o modelo e um bundle de demonstração, então a API roda a partir de um clone, **sem baixar o dataset** (build verificado: ~2min30, imagem de 1,31 GB):
 
 ```bash
 docker build -t fraud-api .
@@ -99,8 +99,8 @@ O plano gratuito suspende a instância após ~15 minutos sem tráfego, então a 
 - [x] Interface de demonstração (`/`), servida pela própria API
 - [x] Artefatos da demonstração versionados e `Dockerfile` apontando para eles
 - [x] `render.yaml` com o serviço configurado
+- [x] Imagem Docker construída e testada localmente (`healthy`, 154 MB de memória, mesmos scores de fora do container)
 - [ ] Publicar no Render e registrar a URL aqui (passo manual, ainda não feito)
-- [ ] `docker build` nunca foi executado: o Docker não está instalado na máquina de desenvolvimento e o primeiro build real será o do Render
 
 **Melhorias anotadas**
 - uid sintético (`card1` + `addr1` + dia − `D1`) no lugar de `card1` como entidade

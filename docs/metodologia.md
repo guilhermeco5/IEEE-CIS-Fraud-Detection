@@ -197,7 +197,22 @@ Medido numa máquina local, uma requisição por vez: **~145 ms por chamada para
 - **Só dois artefatos entram na imagem** (`xgboost.joblib` e o bundle de demonstração). Se faltar um, o `COPY` falha no build, em vez de a API subir respondendo 503.
 - **`libgomp1` é instalada à parte**, porque o XGBoost usa OpenMP e a imagem slim não a traz.
 
-**O que foi e o que não foi validado.** O Docker não está instalado na máquina de desenvolvimento, então **`docker build` e `docker run` não foram executados**: o `Dockerfile`, o `.dockerignore` e a instalação do `libgomp1` só são exercitados de fato no build do Render. O que foi verificado localmente: as versões fixas do `requirements-api.txt` resolvem juntas num venv limpo (sem shap, matplotlib nem pyarrow); a API sobe nesse venv com as mesmas variáveis de ambiente do `Dockerfile` e responde em `/health`, `/meta`, `/predict`, `/docs` e `/`; o comando do `HEALTHCHECK` funciona; e nenhum caminho exigido pelos `COPY` é excluído pelo `.dockerignore`.
+**Build verificado.** `docker build` e `docker run` foram executados (Docker 29.9.3), e a imagem passou em todas as checagens:
+
+| Verificação | Resultado |
+|---|---|
+| Build a partir de um clone, sem o dataset | sucesso em 2min30 |
+| Tamanho da imagem | 1,31 GB (pandas, numpy, scikit-learn e XGBoost dominam) |
+| Subida até `/health` responder | ~9 s |
+| `HEALTHCHECK` do Docker | `healthy`, nenhuma falha |
+| Usuário do processo | `uid=1000(app)`, não-root |
+| Memória em repouso | 154 MB, bem abaixo dos 512 MB do plano gratuito |
+| Rotas `/`, `/docs`, `/openapi.json`, `/meta`, `/predict` | 200 |
+| Modo demonstração | `record=true` ignorado; histórico intacto em 369 transações |
+| Validação de corpo inválido | 422 |
+| Logs | nenhum erro ou aviso |
+
+**Paridade confirmada no container:** os cinco exemplos da interface devolveram exatamente os mesmos scores medidos fora dele (0.0225, 0.0719, 0.1556, 0.1606 e 0.9644), com diferença máxima de 0.0000. Ou seja, o empacotamento não alterou o comportamento do modelo.
 
 ## 8. Deploy (Semana 6)
 
