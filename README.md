@@ -5,7 +5,7 @@ Pipeline de Machine Learning end-to-end para detecção de fraude no dataset IEE
 > **Em 30 segundos**
 > - **Resultado:** XGBoost detecta **43.9% das fraudes bloqueando no máximo 1% dos clientes legítimos** (PR-AUC 0.522, contra 0.034 de um classificador aleatório).
 > - **Avaliação honesta:** split temporal (o teste é o "futuro"), métrica de negócio (recall @ FPR 1%) em vez de acurácia, e a queda de desempenho por semana medida (~50% → ~39% de recall), o que indica *drift*.
-> - **Status:** Semanas 1–4 concluídas; Semana 5 (serving) em andamento. Projeto pessoal de portfólio.
+> - **Status:** Semanas 1–5 concluídas (API de scoring com explicação SHAP e imagem Docker); Semana 6 (deploy) pendente. Projeto pessoal de portfólio.
 
 ---
 
@@ -48,17 +48,36 @@ python -m src.serving --check    # confere que o serving reproduz as features do
 pytest                           # testes
 ```
 
+### API de scoring
+
+Com o modelo e o bundle gerados (`src.train` e `src.serving`):
+
+```bash
+uvicorn api.app:app              # docs interativas em http://127.0.0.1:8000/docs
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{
+  "transaction_dt": 14000000, "transaction_amt": 59.0, "card1": 13926, "product_cd": "W",
+  "features": {"card4": "visa", "card6": "debit", "P_emaildomain": "gmail.com", "C1": 1, "C13": 5}
+}'
+```
+
+A resposta traz `fraud_score`, `is_fraud_flag`, `risk_tier`, `threshold` e as 5 features que mais pesaram (SHAP). Só 5 campos são obrigatórios; o resto das colunas do dataset vai em `features` e, se faltar, é tratado como ausente. `?record=false` consulta sem gravar a transação no histórico do cartão. O `fraud_score` **não é uma probabilidade calibrada**: serve para ordenar e comparar com o limiar. Detalhes e limitações em [`docs/metodologia.md`, seção 7](docs/metodologia.md#7-serving-e-deploy).
+
+Com Docker (precisa dos dois artefatos em `models/` antes do build):
+
+```bash
+docker build -t fraud-api .
+docker run --rm -p 8000:8000 fraud-api
+```
+
 ## Em andamento
 
-**Semana 5: Serving**
-- [x] Núcleo de serving (`src/serving.py`) reutilizando as funções de `src/features.py`, com checagem de paridade treino/serving nos dados reais
-- [ ] Ligar `api/app.py` ao `src/serving.py` (o endpoint `/predict` ainda levanta `NotImplementedError`)
-- [ ] Completar os schemas de request em `api/schemas.py`
-- [ ] Documentar as decisões em `docs/metodologia.md`, seção 7
-
 **Semana 6: Deploy**
-- [ ] Deploy em Render/Railway
+- [ ] Deploy em Render/Railway (decidir como levar `models/xgboost.joblib` e `models/serving_bundle.joblib`, que não são versionados)
 - [ ] Interface simples de demonstração
+- [ ] Validar o build da imagem Docker (ver "API de scoring" acima)
 
 **Melhorias anotadas**
 - uid sintético (`card1` + `addr1` + dia − `D1`) no lugar de `card1` como entidade
@@ -82,7 +101,7 @@ pytest                           # testes
 | `src/serving.py` | scoring de uma transação com as mesmas features do treino |
 | `api/` | API FastAPI (`app.py`) e schemas Pydantic (`schemas.py`) |
 | `tests/` | testes de preprocessing, features, avaliação, explicabilidade e serving |
-| `Dockerfile` | imagem da API |
+| `Dockerfile`, `requirements-api.txt` | imagem da API e as dependências dela (versões iguais às do treino) |
 
 **Referência**
 
@@ -106,12 +125,13 @@ pytest                           # testes
 [IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) (Kaggle): 590.540 transações reais anonimizadas, 434 colunas após o join, valores ausentes informativos e 3.50% de fraude. O dataset não está no repositório.
 
 <details>
-<summary><strong>Concluído: Semanas 1–4</strong></summary>
+<summary><strong>Concluído: Semanas 1–5</strong></summary>
 
 - **Semana 1: EDA e limpeza.** Padrões de valores ausentes e split temporal (não aleatório) por `TransactionDT`.
 - **Semana 2: Feature engineering.** 20 features novas: velocidade e frequência por `card1`, agregações de valor, flags de ausência e frequency encoding de categóricas de alta cardinalidade.
 - **Semana 3: Modelagem e avaliação.** Baseline (regressão logística) → XGBoost, com ablação das features da Semana 2. PR-AUC e recall a FPR fixo, por semana do teste.
 - **Semana 4: Explicabilidade.** SHAP global, gráficos de dependência e leitura de três casos (acerto, alarme falso e fraude não detectada).
+- **Semana 5: Serving.** API FastAPI (`/predict`, `/health`) que calcula as features com as mesmas funções do treino (paridade verificada nos dados reais: 0 colunas divergentes), explica cada score com SHAP e usa um histórico por cartão em memória. `Dockerfile` e `requirements-api.txt` com as versões do treino.
 
 </details>
 

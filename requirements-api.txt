@@ -1,0 +1,20 @@
+# Dependências só da API (imagem Docker). O treino e as análises usam requirements.txt.
+#
+# As versões são FIXAS e iguais às do ambiente que gerou os artefatos: o modelo
+# (xgboost.joblib) e o bundle (serving_bundle.joblib) são pickles, e pickles de
+# pandas/scikit-learn/XGBoost não são garantidos entre versões. Ao retreinar com
+# outras versões, atualize este arquivo junto.
+#
+# Ficam de fora de propósito: shap, matplotlib, pyarrow, lightgbm, mlflow, jupyter.
+
+# Web
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+pydantic==2.13.4
+
+# Modelo e features
+xgboost==3.4.0
+scikit-learn==1.9.0   # o XGBClassifier serializado herda de classes do scikit-learn
+pandas==2.3.3
+numpy==2.5.2
+joblib==1.5.3

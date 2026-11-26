@@ -1,0 +1,21 @@
+# O contexto do build não precisa de dados, notebooks nem testes (data/ tem GBs).
+.git
+.gitignore
+.github
+.pytest_cache
+.vscode
+**/__pycache__
+**/*.pyc
+.env
+venv/
+.venv/
+
+data/
+notebooks/
+outputs/
+tests/
+docs/
+models/baseline_logreg.joblib
+*.md
+Dockerfile
+.dockerignore

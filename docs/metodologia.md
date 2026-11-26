@@ -154,4 +154,53 @@ Figuras em `outputs/figures/shap_waterfall_{tp,fp,fn}.png`.
 
 ## 7. Serving e deploy
 
-*A preencher nas Semanas 5–6 — decisões de arquitetura da API, escolha de plataforma de deploy, e qualquer trade-off relevante.*
+Implementado em `src/serving.py` (núcleo, sem FastAPI) e `api/` (contrato HTTP), testado em `tests/test_serving.py` e `tests/test_api.py`. O deploy é da Semana 6; esta seção cobre a API e a imagem Docker.
+
+### O problema central: paridade treino/serving
+
+O modelo usa 451 colunas, 20 delas criadas na Semana 2 a partir do histórico do cartão (`card1`) e de um frequency encoder ajustado no treino, além de 31 colunas `category` que precisam ter as categorias do treino. Servir isso calculando as features "de outro jeito" produz *skew* silencioso: a API responde, os números parecem razoáveis e estão errados.
+
+- **Sem segunda implementação.** Para pontuar uma transação, `FraudScorer` monta o histórico do cartão mais a nova linha e chama as mesmas funções do treino (`add_velocity_features`, `add_aggregation_features`, `add_missing_flags`, `apply_frequency_encoder`). Como elas só olham o passado estrito (seção 3), o resultado é o do batch por construção.
+- **Detalhes que causariam divergência.** `TransactionAmt` é float32 no treino (o `data_loader` faz downcast), então a linha nova e o histórico também são float32; senão as médias e desvios mudam no arredondamento. As categorias vêm do treino, não do teste. Empates de timestamp ficam de fora do passado, como no batch.
+- **Verificação nos dados reais** (`python -m src.serving --check`, 300 linhas aleatórias do teste, `record=False`): **0 das 451 colunas divergem** e a diferença máxima de score contra o `predict_proba` em lote é **0.0**. Um teste com dados sintéticos pontua o teste em ordem de tempo, gravando cada transação, e compara as 451 colunas com o `build_features` em lote. Quebrar a paridade de propósito (histórico vazio) derruba 8 colunas, então o teste detecta o erro que se propõe a detectar.
+- **Uma chamada real pela API** (`uvicorn` + `curl`, a fraude detectada da seção 6, TransactionID 3540441) devolveu score 0.999994, igual ao batch, e os mesmos cinco fatores SHAP do waterfall.
+
+### Contrato da API
+
+- **Entrada:** cinco campos obrigatórios (`transaction_dt`, `transaction_amt`, `card1`, `product_cd`, `transaction_id` opcional) mais um dict `features` com qualquer das 434 colunas brutas, pelo nome do dataset. O que faltar é NaN, que o XGBoost trata como ausente. Escolhi esse formato em vez de ~15 campos tipados porque o modelo usa centenas de colunas; só campos tipados o deixariam rodando quase sempre com NaN.
+- **Campos inválidos não derrubam a chamada.** Coluna desconhecida, categoria nunca vista no treino e valor não numérico viram NaN e voltam em `ignored_features` com o motivo, para o chamador perceber que o modelo não usou aquilo. Corpo mal formado (valor <= 0, campo obrigatório faltando) retorna 422.
+- **Saída:** `fraud_score`, `is_fraud_flag`, `risk_tier`, `threshold` e as cinco `top_factors` (SHAP, em log-odds). A explicação vem na mesma resposta porque o `DMatrix` é montado uma vez e serve ao score e às contribuições.
+- **`fraud_score` não é probabilidade calibrada.** O `scale_pos_weight` (seção 4) desloca a margem, o que explica scores de 0.0000 e 1.0000. Por isso o campo não se chama `fraud_probability`: serve para ordenar e comparar com o limiar.
+- **Faixas de risco por limiar, não por score fixo.** `alto`: acima do limiar de FPR 1% (0.7169); `médio`: acima do de FPR 5% (0.4032); `baixo`: abaixo. A flag usa o mesmo limiar de `alto`, o ponto de operação das métricas da seção 5.
+- **`GET /health`** devolve 503 se o modelo não carregou, e o `/predict` também, com a mensagem dizendo quais comandos rodar. A API sobe mesmo sem artefatos, para o erro aparecer no `/health` e não como container que reinicia em loop.
+
+### Histórico em memória
+
+As features de velocidade e agregação precisam do histórico de cada cartão. O bundle (`models/serving_bundle.joblib`, 3.5 MB) guarda tempo e valor das 590.540 transações de 13.553 cartões, e cada transação pontuada com `record=true` (padrão) entra nele. `record=false` só consulta.
+
+Isso reproduz o treino, mas tem limites que o desenho assume:
+
+- **Estado por processo:** uma réplica só, e reiniciar perde o que foi acrescentado depois do bundle. Em produção seria um feature store (Redis ou similar), com o mesmo cálculo sobre o histórico lido de lá.
+- **O histórico já contém o período do teste.** Uma transação com `TransactionDT` dentro desse intervalo "reprisa" o passado; é aceitável para demonstração e é o que permite conferir a paridade com dados reais.
+- **Concorrência:** um lock serializa as chamadas; com uma réplica e CPU-bound, isso não é o gargalo.
+
+### Desempenho
+
+Medido numa máquina local, uma requisição por vez: **~145 ms por chamada para um cartão típico e ~225 ms em média numa amostra aleatória do teste**, que tem muitos cartões de histórico longo. O tempo vai para converter as 451 colunas no formato do XGBoost (~46 ms), montar a linha (~42 ms) e calcular o SHAP (~20 ms); a predição em si leva ~3 ms. Dá para acelerar mantendo somas acumuladas por cartão, mas isso reimplementaria a lógica de `features.py` e traria de volta o risco de skew que o desenho evita. Para um scoring online de baixo volume o custo é aceitável; para alto volume é a primeira coisa a otimizar.
+
+### Imagem Docker
+
+`Dockerfile` (Python 3.13-slim, usuário não-root, `HEALTHCHECK` em `/health`, `PORT` configurável para plataformas que injetam a porta) e `requirements-api.txt`.
+
+- **Versões fixas, iguais às do treino.** O modelo e o bundle são pickles; pickles de pandas, scikit-learn e XGBoost não são garantidos entre versões. Por isso a imagem usa o mesmo Python e as mesmas versões do ambiente que gerou os artefatos, e o `requirements-api.txt` deve ser atualizado a cada retreino com outras versões.
+- **Dependências enxutas.** Ficam de fora shap, matplotlib, pyarrow, lightgbm, mlflow e jupyter. Isso só é possível porque os imports pesados de `src/explain.py` são tardios (Parte 1 da Semana 5).
+- **Só dois artefatos entram na imagem** (`xgboost.joblib` e `serving_bundle.joblib`). Se faltar um, o `COPY` falha no build, em vez de a API subir respondendo 503.
+- **`libgomp1` é instalada à parte**, porque o XGBoost usa OpenMP e a imagem slim não a traz.
+
+**O que foi e o que não foi validado.** O Docker não está instalado na máquina de desenvolvimento, então **`docker build` e `docker run` não foram executados**: o `Dockerfile`, o `.dockerignore` e a instalação do `libgomp1` estão sem teste. O que foi verificado é o conteúdo da imagem, num venv isolado criado só com o `requirements-api.txt` (as versões fixas resolvem juntas; shap, matplotlib e pyarrow ausentes): a API sobe a partir dele com os artefatos reais e devolve o mesmo score do batch (0.999994) e os mesmos fatores. A primeira coisa da Semana 6 é rodar o build de verdade.
+
+### Limitações
+
+- Os limiares de FPR 1% e 5% foram calculados no teste, como as métricas da seção 5; fixá-los numa validação separada é uma melhoria anotada. Com o drift (seção 5), eles precisam ser recalculados a cada retreino.
+- O bundle contém dados derivados do dataset da competição, e `models/` não é versionado. Como levar esses artefatos ao ambiente de deploy é decisão da Semana 6.
+- A API não tem autenticação, limite de taxa nem persistência: é uma demonstração, não um serviço de produção.
