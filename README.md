@@ -94,7 +94,7 @@ A resposta traz `fraud_score`, `is_fraud_flag`, `risk_tier`, `threshold` e as 5 
 
 A configuração está em [`render.yaml`](render.yaml) (Docker, plano gratuito, health check em `/health`). No painel do Render: **New → Blueprint**, apontando para este repositório. Nada precisa ser enviado à mão, porque os artefatos da demonstração estão versionados.
 
-O plano gratuito suspende a instância após ~15 minutos sem tráfego, então a primeira chamada depois disso leva alguns segundos.
+O plano gratuito suspende a instância depois de um período sem tráfego, então a primeira chamada seguinte leva alguns segundos. O tempo exato não foi medido.
 
 ## Roadmap
 

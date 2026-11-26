@@ -1,8 +1,9 @@
 # Infraestrutura como código do Render (https://render.com/docs/blueprint-spec).
 # Para publicar: Render → New → Blueprint → aponte para este repositório.
 #
-# O plano gratuito suspende a instância após ~15 min sem tráfego; a primeira
-# chamada depois disso leva alguns segundos (o processo sobe e carrega o modelo).
+# O plano gratuito suspende a instância depois de um período sem tráfego; a
+# primeira chamada seguinte leva alguns segundos (o processo sobe e carrega o
+# modelo). O limite de ociosidade não foi medido.
 services:
   - type: web
     name: fraud-detection-api

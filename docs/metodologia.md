@@ -226,7 +226,7 @@ Medido numa máquina local, uma requisição por vez: **~145 ms por chamada para
 
 O que o plano gratuito impõe, e que a demonstração assume:
 
-- **A instância dorme** após cerca de 15 minutos sem tráfego. A primeira chamada depois disso leva alguns segundos, porque o processo sobe e carrega o modelo do zero. A página trata esse caso na mensagem de erro de rede.
+- **A instância dorme** depois de um período sem tráfego. A primeira chamada seguinte leva alguns segundos, porque o processo sobe e carrega o modelo do zero. A página trata esse caso na mensagem de erro de rede. **Não medi nem o limite de ociosidade nem o tempo da partida a frio**: a medição exige silêncio total por dezenas de minutos, já que qualquer requisição reinicia o contador. A documentação do Render sobre o plano gratuito estava indisponível (HTTP 404) quando tentei consultá-la. Com a instância acordada, `/health` responde em ~0,45 s.
 - **O histórico em memória reinicia** junto com o processo, voltando ao conteúdo do bundle. Sem efeito prático aqui, porque o modo demonstração não grava nada.
 - **Uma réplica, um worker** (`WEB_CONCURRENCY=1`): o histórico é estado por processo (seção 7), então mais de um worker daria respostas diferentes conforme o worker que atendesse.
 
