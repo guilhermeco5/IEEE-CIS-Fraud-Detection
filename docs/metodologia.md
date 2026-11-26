@@ -218,7 +218,11 @@ Medido numa máquina local, uma requisição por vez: **~145 ms por chamada para
 
 ### Plataforma
 
-**Render**, plano gratuito, configurado em `render.yaml` (`runtime: docker`, `healthCheckPath: /health`, `autoDeploy`). O deploy sai do próprio repositório: o Render constrói a imagem do `Dockerfile` a cada push na branch principal. A API usa ~220 MB de memória residente depois de carregar o modelo, dentro dos 512 MB do plano.
+**Render**, plano gratuito, configurado em `render.yaml` (`runtime: docker`, `healthCheckPath: /health`, `autoDeploy`). O deploy sai do próprio repositório: o Render constrói a imagem do `Dockerfile` a cada push na branch principal, sem passo manual nem upload de artefatos, porque o modelo e o bundle de demonstração estão versionados.
+
+**No ar em https://fraud-detection-api-k0yd.onrender.com** (o sufixo veio do Render, porque subdomínios `onrender.com` são únicos entre todas as contas). O smoke test em produção confirmou: `/health`, `/meta`, `/docs` e `/` respondem 200; o modo demonstração ignora `record=true`; corpo inválido retorna 422; e **os cinco exemplos da interface devolvem exatamente os mesmos scores** medidos localmente e dentro do container, com diferença 0.0000. A cadeia inteira, do parquet de treino ao serviço público, preserva o comportamento do modelo.
+
+**Latência em produção: ~800 ms por chamada**, contra ~145 ms a ~225 ms na máquina local. A diferença vem do plano gratuito (0,1 CPU) somada à distância de rede até a região `oregon`. Para uma demonstração é aceitável; num uso real, as otimizações da seção 7 e uma região mais próxima seriam o primeiro passo.
 
 O que o plano gratuito impõe, e que a demonstração assume:
 

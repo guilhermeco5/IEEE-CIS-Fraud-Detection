@@ -3,9 +3,10 @@
 Pipeline de Machine Learning end-to-end para detecção de fraude no dataset IEEE-CIS: split temporal, features de velocidade sem vazamento, avaliação sob desbalanceamento severo, explicabilidade com SHAP e serving com paridade treino/serving verificada.
 
 > **Em 30 segundos**
+> - **Demonstração ao vivo:** [https://fraud-detection-api-k0yd.onrender.com](https://fraud-detection-api-k0yd.onrender.com): pontue uma transação e veja os fatores SHAP por trás do score. A instância é do plano gratuito: se estiver ociosa, a primeira chamada demora alguns segundos.
 > - **Resultado:** XGBoost detecta **43.9% das fraudes bloqueando no máximo 1% dos clientes legítimos** (PR-AUC 0.522, contra 0.034 de um classificador aleatório).
 > - **Avaliação honesta:** split temporal (o teste é o "futuro"), métrica de negócio (recall @ FPR 1%) em vez de acurácia, e a queda de desempenho por semana medida (~50% → ~39% de recall), o que indica *drift*.
-> - **Status:** pipeline completo, das semanas 1 a 6: EDA, features, modelagem, SHAP, API e interface de demonstração. Falta só publicar no Render (passo manual). Projeto pessoal de portfólio.
+> - **Status:** concluído, das semanas 1 a 6: EDA, features, modelagem, SHAP, API, interface e deploy. Projeto pessoal de portfólio.
 
 ---
 
@@ -63,6 +64,8 @@ Sem Docker, com as dependências instaladas:
 FRAUD_BUNDLE_FILE=models/serving_bundle_demo.joblib FRAUD_DEMO_MODE=1 uvicorn api.app:app
 ```
 
+Em produção, as mesmas rotas respondem em [https://fraud-detection-api-k0yd.onrender.com](https://fraud-detection-api-k0yd.onrender.com).
+
 | Rota | O que faz |
 |---|---|
 | `/` | página de demonstração: formulário, exemplos prontos e os fatores SHAP de cada score |
@@ -93,14 +96,14 @@ A configuração está em [`render.yaml`](render.yaml) (Docker, plano gratuito, 
 
 O plano gratuito suspende a instância após ~15 minutos sem tráfego, então a primeira chamada depois disso leva alguns segundos.
 
-## Em andamento
+## Roadmap
 
-**Semana 6: Deploy**
+**Semana 6: Deploy** (concluída)
 - [x] Interface de demonstração (`/`), servida pela própria API
 - [x] Artefatos da demonstração versionados e `Dockerfile` apontando para eles
 - [x] `render.yaml` com o serviço configurado
 - [x] Imagem Docker construída e testada localmente (`healthy`, 154 MB de memória, mesmos scores de fora do container)
-- [ ] Publicar no Render e registrar a URL aqui (passo manual, ainda não feito)
+- [x] Publicado no Render: [https://fraud-detection-api-k0yd.onrender.com](https://fraud-detection-api-k0yd.onrender.com)
 
 **Melhorias anotadas**
 - uid sintético (`card1` + `addr1` + dia − `D1`) no lugar de `card1` como entidade
