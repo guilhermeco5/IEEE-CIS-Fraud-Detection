@@ -1,0 +1,26 @@
+# Infraestrutura como código do Render (https://render.com/docs/blueprint-spec).
+# Para publicar: Render → New → Blueprint → aponte para este repositório.
+#
+# O plano gratuito suspende a instância após ~15 min sem tráfego; a primeira
+# chamada depois disso leva alguns segundos (o processo sobe e carrega o modelo).
+services:
+  - type: web
+    name: fraud-detection-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Repetidos aqui, embora já estejam no Dockerfile, para ficarem visíveis
+      # no painel do Render e poderem ser alterados sem rebuild.
+      - key: FRAUD_BUNDLE_FILE
+        value: /app/models/serving_bundle_demo.joblib
+      # Demonstração pública: o servidor nunca grava transações no histórico.
+      - key: FRAUD_DEMO_MODE
+        value: "1"
+      # Uma réplica e um worker: o histórico vive na memória do processo
+      # (docs/metodologia.md, seção 7) e o plano gratuito tem 512 MB.
+      - key: WEB_CONCURRENCY
+        value: "1"

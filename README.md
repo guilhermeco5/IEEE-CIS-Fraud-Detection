@@ -5,7 +5,7 @@ Pipeline de Machine Learning end-to-end para detecção de fraude no dataset IEE
 > **Em 30 segundos**
 > - **Resultado:** XGBoost detecta **43.9% das fraudes bloqueando no máximo 1% dos clientes legítimos** (PR-AUC 0.522, contra 0.034 de um classificador aleatório).
 > - **Avaliação honesta:** split temporal (o teste é o "futuro"), métrica de negócio (recall @ FPR 1%) em vez de acurácia, e a queda de desempenho por semana medida (~50% → ~39% de recall), o que indica *drift*.
-> - **Status:** Semanas 1–5 concluídas (API de scoring com explicação SHAP e imagem Docker); Semana 6 (deploy) pendente. Projeto pessoal de portfólio.
+> - **Status:** pipeline completo, das semanas 1 a 6: EDA, features, modelagem, SHAP, API e interface de demonstração. Falta só publicar no Render (passo manual). Projeto pessoal de portfólio.
 
 ---
 
@@ -48,12 +48,32 @@ python -m src.serving --check    # confere que o serving reproduz as features do
 pytest                           # testes
 ```
 
-### API de scoring
+### API de scoring e demonstração
 
-Com o modelo e o bundle gerados (`src.train` e `src.serving`):
+O repositório já traz o modelo e um bundle de demonstração, então a API roda a partir de um clone, **sem baixar o dataset**:
 
 ```bash
-uvicorn api.app:app              # docs interativas em http://127.0.0.1:8000/docs
+docker build -t fraud-api .
+docker run --rm -p 8000:8000 fraud-api     # http://localhost:8000
+```
+
+Sem Docker, com as dependências instaladas:
+
+```bash
+FRAUD_BUNDLE_FILE=models/serving_bundle_demo.joblib FRAUD_DEMO_MODE=1 uvicorn api.app:app
+```
+
+| Rota | O que faz |
+|---|---|
+| `/` | página de demonstração: formulário, exemplos prontos e os fatores SHAP de cada score |
+| `/docs` | documentação interativa (Swagger) |
+| `POST /predict` | pontua uma transação |
+| `/health`, `/meta` | estado do serviço e opções aceitas pelo formulário |
+
+Para servir o modelo com o histórico completo, gere os artefatos (`python -m src.train` e `python -m src.serving`, exige o dataset) e rode:
+
+```bash
+uvicorn api.app:app              # usa models/serving_bundle.joblib por padrão
 ```
 
 ```bash
@@ -65,19 +85,22 @@ curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -
 
 A resposta traz `fraud_score`, `is_fraud_flag`, `risk_tier`, `threshold` e as 5 features que mais pesaram (SHAP). Só 5 campos são obrigatórios; o resto das colunas do dataset vai em `features` e, se faltar, é tratado como ausente. `?record=false` consulta sem gravar a transação no histórico do cartão. O `fraud_score` **não é uma probabilidade calibrada**: serve para ordenar e comparar com o limiar. Detalhes e limitações em [`docs/metodologia.md`, seção 7](docs/metodologia.md#7-serving-e-deploy).
 
-Com Docker (precisa dos dois artefatos em `models/` antes do build):
+**O que a demonstração não é.** O bundle público tem o histórico de apenas três cartões (os do formulário); qualquer outro `card1` é tratado como cartão novo. Os scores da demonstração, portanto, não reproduzem as métricas da tabela acima, que valem para o teste completo. Ver [`docs/metodologia.md`, seção 8](docs/metodologia.md#8-deploy-semana-6).
 
-```bash
-docker build -t fraud-api .
-docker run --rm -p 8000:8000 fraud-api
-```
+### Publicar no Render
+
+A configuração está em [`render.yaml`](render.yaml) (Docker, plano gratuito, health check em `/health`). No painel do Render: **New → Blueprint**, apontando para este repositório. Nada precisa ser enviado à mão, porque os artefatos da demonstração estão versionados.
+
+O plano gratuito suspende a instância após ~15 minutos sem tráfego, então a primeira chamada depois disso leva alguns segundos.
 
 ## Em andamento
 
 **Semana 6: Deploy**
-- [ ] Deploy em Render/Railway (decidir como levar `models/xgboost.joblib` e `models/serving_bundle.joblib`, que não são versionados)
-- [ ] Interface simples de demonstração
-- [ ] Validar o build da imagem Docker (ver "API de scoring" acima)
+- [x] Interface de demonstração (`/`), servida pela própria API
+- [x] Artefatos da demonstração versionados e `Dockerfile` apontando para eles
+- [x] `render.yaml` com o serviço configurado
+- [ ] Publicar no Render e registrar a URL aqui (passo manual, ainda não feito)
+- [ ] `docker build` nunca foi executado: o Docker não está instalado na máquina de desenvolvimento e o primeiro build real será o do Render
 
 **Melhorias anotadas**
 - uid sintético (`card1` + `addr1` + dia − `D1`) no lugar de `card1` como entidade
@@ -101,7 +124,8 @@ docker run --rm -p 8000:8000 fraud-api
 | `src/serving.py` | scoring de uma transação com as mesmas features do treino |
 | `api/` | API FastAPI (`app.py`) e schemas Pydantic (`schemas.py`) |
 | `tests/` | testes de preprocessing, features, avaliação, explicabilidade e serving |
-| `Dockerfile`, `requirements-api.txt` | imagem da API e as dependências dela (versões iguais às do treino) |
+| `api/static/index.html` | página de demonstração servida em `/` |
+| `Dockerfile`, `requirements-api.txt`, `render.yaml` | imagem da API, as dependências dela (versões iguais às do treino) e o serviço no Render |
 
 **Referência**
 
@@ -117,7 +141,7 @@ docker run --rm -p 8000:8000 fraud-api
 |---|---|
 | `outputs/metrics/` | comparação de modelos, desempenho por semana, importâncias SHAP e gain |
 | `outputs/figures/` | gráficos SHAP e de avaliação (não versionados) |
-| `models/` | modelos e bundle de serving (não versionados) |
+| `models/` | `xgboost.joblib` e `serving_bundle_demo.joblib` são versionados (a demo precisa deles); o bundle completo, não |
 | `data/processed/` | dados após limpeza e split (não versionados) |
 
 ## Dataset
@@ -125,13 +149,14 @@ docker run --rm -p 8000:8000 fraud-api
 [IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) (Kaggle): 590.540 transações reais anonimizadas, 434 colunas após o join, valores ausentes informativos e 3.50% de fraude. O dataset não está no repositório.
 
 <details>
-<summary><strong>Concluído: Semanas 1–5</strong></summary>
+<summary><strong>Concluído: Semanas 1 a 6</strong></summary>
 
 - **Semana 1: EDA e limpeza.** Padrões de valores ausentes e split temporal (não aleatório) por `TransactionDT`.
 - **Semana 2: Feature engineering.** 20 features novas: velocidade e frequência por `card1`, agregações de valor, flags de ausência e frequency encoding de categóricas de alta cardinalidade.
 - **Semana 3: Modelagem e avaliação.** Baseline (regressão logística) → XGBoost, com ablação das features da Semana 2. PR-AUC e recall a FPR fixo, por semana do teste.
 - **Semana 4: Explicabilidade.** SHAP global, gráficos de dependência e leitura de três casos (acerto, alarme falso e fraude não detectada).
 - **Semana 5: Serving.** API FastAPI (`/predict`, `/health`) que calcula as features com as mesmas funções do treino (paridade verificada nos dados reais: 0 colunas divergentes), explica cada score com SHAP e usa um histórico por cartão em memória. `Dockerfile` e `requirements-api.txt` com as versões do treino.
+- **Semana 6: Deploy.** Interface de demonstração em `/` (HTML único, sem dependências externas), bundle reduzido a três cartões para não publicar dados do dataset, modo demonstração que impede gravação no histórico e `render.yaml` para o Render.
 
 </details>
 

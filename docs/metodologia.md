@@ -194,13 +194,52 @@ Medido numa máquina local, uma requisição por vez: **~145 ms por chamada para
 
 - **Versões fixas, iguais às do treino.** O modelo e o bundle são pickles; pickles de pandas, scikit-learn e XGBoost não são garantidos entre versões. Por isso a imagem usa o mesmo Python e as mesmas versões do ambiente que gerou os artefatos, e o `requirements-api.txt` deve ser atualizado a cada retreino com outras versões.
 - **Dependências enxutas.** Ficam de fora shap, matplotlib, pyarrow, lightgbm, mlflow e jupyter. Isso só é possível porque os imports pesados de `src/explain.py` são tardios (Parte 1 da Semana 5).
-- **Só dois artefatos entram na imagem** (`xgboost.joblib` e `serving_bundle.joblib`). Se faltar um, o `COPY` falha no build, em vez de a API subir respondendo 503.
+- **Só dois artefatos entram na imagem** (`xgboost.joblib` e o bundle de demonstração). Se faltar um, o `COPY` falha no build, em vez de a API subir respondendo 503.
 - **`libgomp1` é instalada à parte**, porque o XGBoost usa OpenMP e a imagem slim não a traz.
 
-**O que foi e o que não foi validado.** O Docker não está instalado na máquina de desenvolvimento, então **`docker build` e `docker run` não foram executados**: o `Dockerfile`, o `.dockerignore` e a instalação do `libgomp1` estão sem teste. O que foi verificado é o conteúdo da imagem, num venv isolado criado só com o `requirements-api.txt` (as versões fixas resolvem juntas; shap, matplotlib e pyarrow ausentes): a API sobe a partir dele com os artefatos reais e devolve o mesmo score do batch (0.999994) e os mesmos fatores. A primeira coisa da Semana 6 é rodar o build de verdade.
+**O que foi e o que não foi validado.** O Docker não está instalado na máquina de desenvolvimento, então **`docker build` e `docker run` não foram executados**: o `Dockerfile`, o `.dockerignore` e a instalação do `libgomp1` só são exercitados de fato no build do Render. O que foi verificado localmente: as versões fixas do `requirements-api.txt` resolvem juntas num venv limpo (sem shap, matplotlib nem pyarrow); a API sobe nesse venv com as mesmas variáveis de ambiente do `Dockerfile` e responde em `/health`, `/meta`, `/predict`, `/docs` e `/`; o comando do `HEALTHCHECK` funciona; e nenhum caminho exigido pelos `COPY` é excluído pelo `.dockerignore`.
+
+## 8. Deploy (Semana 6)
+
+### Plataforma
+
+**Render**, plano gratuito, configurado em `render.yaml` (`runtime: docker`, `healthCheckPath: /health`, `autoDeploy`). O deploy sai do próprio repositório: o Render constrói a imagem do `Dockerfile` a cada push na branch principal. A API usa ~220 MB de memória residente depois de carregar o modelo, dentro dos 512 MB do plano.
+
+O que o plano gratuito impõe, e que a demonstração assume:
+
+- **A instância dorme** após cerca de 15 minutos sem tráfego. A primeira chamada depois disso leva alguns segundos, porque o processo sobe e carrega o modelo do zero. A página trata esse caso na mensagem de erro de rede.
+- **O histórico em memória reinicia** junto com o processo, voltando ao conteúdo do bundle. Sem efeito prático aqui, porque o modo demonstração não grava nada.
+- **Uma réplica, um worker** (`WEB_CONCURRENCY=1`): o histórico é estado por processo (seção 7), então mais de um worker daria respostas diferentes conforme o worker que atendesse.
+
+### O que é publicado, e o que não é
+
+O bundle completo tem `card1`, instante e valor das 590.540 transações do dataset da competição. Publicá-lo num repositório e numa imagem redistribuiria dados derivados do dataset, então a demonstração usa um **bundle reduzido** (`models/serving_bundle_demo.joblib`, 40 KB), gerado por `python -m src.serving --demo`:
+
+- **Histórico de três cartões** (369 transações), escolhidos por terem perfis distintos: rajada recente, ticket alto e ticket baixo estável.
+- **O frequency encoder de `card1` também é restrito a eles.** Esse encoder lista cada `card1` do treino com sua frequência; mantê-lo inteiro exporia os identificadores que o histórico reduzido esconde.
+- **O resto do bundle são agregados** e vai como está: ordem e tipos das colunas, categorias do treino, frequências de domínio de e-mail, dispositivo e navegador, os limiares e a transação de referência (uma mediana ou moda por coluna).
+
+Consequência honesta: **só esses três cartões têm histórico na demonstração**. Qualquer outro `card1` é tratado como cartão novo (`card1_n_prev` = 0, médias NaN, `card1_freq` = 0), que é o comportamento correto do pipeline para um cartão nunca visto, mas significa que os scores da demonstração não reproduzem as métricas da seção 5. Aquelas valem para o teste completo, com o bundle completo.
+
+### Modo demonstração
+
+Com `FRAUD_DEMO_MODE=1`, o servidor ignora `record=true` e nunca grava transações no histórico. A API é pública e não tem autenticação; sem essa trava, qualquer visitante poderia poluir o histórico dos cartões da demonstração e mudar o resultado para os próximos. A página também envia `record=false` em toda chamada, mas a garantia está no servidor, não no cliente. O `/health` e o `/meta` informam `demo_mode`, e a página mostra o aviso a partir dessa resposta.
+
+### Interface
+
+Um HTML único (`api/static/index.html`) servido pela própria API em `/`: sem framework, sem CDN e sem recurso externo, no mesmo container e na mesma origem. O formulário monta o payload a partir do `/meta` (categorias aceitas, cartões com histórico, limiares e transação de referência), em vez de repetir essas listas no front-end.
+
+Duas decisões que vieram de medir, não de supor:
+
+- **A transação de referência é preenchida por padrão.** Um payload esparso fica fora da distribuição de treino: colunas como `C3`, `C13` e `C14` praticamente nunca faltam nos dados reais, e quando faltam o modelo as lê como sinal forte de transação legítima (SHAP de -2.0, -1.4 e -0.8). Com poucos campos, o perfil de risco da seção 6 pontuava 0.0025; com a referência, 0.9644. A caixa é explicada na própria página.
+- **O exemplo de rajada não é vendido como sinal de fraude.** Pontuando a mesma transação 2 minutos e 2 dias depois da última do cartão, o score vai de 0.156 para 0.161, ou seja, praticamente não muda. Isso é coerente com a seção 6, onde as features de velocidade se mostraram fracas, e o texto do exemplo diz exatamente isso em vez de sugerir o contrário.
+
+Os cinco exemplos são sintéticos (valores típicos do treino com alterações pontuais), rotulados como tal, e os números citados foram obtidos rodando o scorer, não estimados.
 
 ### Limitações
 
 - Os limiares de FPR 1% e 5% foram calculados no teste, como as métricas da seção 5; fixá-los numa validação separada é uma melhoria anotada. Com o drift (seção 5), eles precisam ser recalculados a cada retreino.
-- O bundle contém dados derivados do dataset da competição, e `models/` não é versionado. Como levar esses artefatos ao ambiente de deploy é decisão da Semana 6.
-- A API não tem autenticação, limite de taxa nem persistência: é uma demonstração, não um serviço de produção.
+- A demonstração usa histórico parcial (três cartões), então os scores dela não representam o desempenho medido na seção 5.
+- A API não tem autenticação nem limite de taxa: o modo demonstração protege o estado, mas não impede abuso de CPU. É uma demonstração, não um serviço de produção.
+- O modelo e o bundle são pickles com versões fixas; o `requirements-api.txt` precisa acompanhar qualquer retreino feito em outro ambiente.
+- Cada retreino versionado acrescenta ~16 MB ao histórico do Git (`xgboost.joblib`). Git LFS seria a saída se isso crescer.
