@@ -7,6 +7,9 @@ data/processed/*.parquet
 # Modelos treinados
 models/*.pkl
 models/*.joblib
+# Exceção: o que a demo pública precisa. O bundle COMPLETO (serving_bundle.joblib) continua fora do git.
+!models/xgboost.joblib
+!models/serving_bundle_demo.joblib
 models/*.json
 
 # Python

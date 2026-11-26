@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.serving import FraudScorer, HistoryStore
+from src.config import BUNDLE_ENV_VAR, SERVING_BUNDLE_FILE
+from src.serving import FraudScorer, HistoryStore, build_demo_bundle, runtime_bundle_file
 
 
 def _payload(row: pd.Series, raw_columns) -> dict:
@@ -152,3 +153,40 @@ def test_history_store_keeps_time_order():
     assert list(times) == [10, 20, 20, 30] and amounts.dtype == np.float32
     assert store.n_cards == 1 and store.n_transactions == 4
     assert len(store.get(8)[0]) == 0
+
+
+def test_demo_bundle_keeps_only_requested_cards(world):
+    _, bundle, *_ = world
+    demo = build_demo_bundle(bundle, cards=[1000, 1001])
+    assert set(demo["history"]) == {1000, 1001} and demo["demo_cards"] == [1000, 1001]
+    assert demo["feature_columns"] == bundle["feature_columns"] and demo["thresholds"] == bundle["thresholds"]
+    assert set(demo["freq_encoder"]["card1"].index) == {1000, 1001}
+    # o bundle completo não pode ser alterado por quem gera o de demo
+    assert len(bundle["history"]) > 2 and len(bundle["freq_encoder"]["card1"]) > 2
+    assert "demo_cards" not in bundle
+
+
+def test_demo_bundle_rejects_card_without_history(world):
+    _, bundle, *_ = world
+    with pytest.raises(ValueError, match="999999"):
+        build_demo_bundle(bundle, cards=[1000, 999_999])
+
+
+def test_card_outside_demo_bundle_behaves_as_new_card(world):
+    model, bundle, *_ = world
+    demo = build_demo_bundle(bundle, cards=[1000])
+    scorer = FraudScorer(model, demo, history=HistoryStore(dict(demo["history"])))
+    assert scorer.demo_cards == [1000]
+    kwargs = dict(transaction_dt=5_000_000, transaction_amt=50.0, product_cd="W")
+    known = scorer.build_row(card1=1000, **kwargs)[0].iloc[0]
+    outside = scorer.build_row(card1=1002, **kwargs)[0].iloc[0]
+    assert known["card1_n_prev"] > 0 and known["card1_freq"] > 0
+    assert outside["card1_n_prev"] == 0 and np.isnan(outside["card1_amt_mean_prev"])
+    assert outside["card1_freq"] == 0  # card1 nunca visto, como no treino
+
+
+def test_runtime_bundle_file_follows_env_at_call_time(monkeypatch, tmp_path):
+    monkeypatch.delenv(BUNDLE_ENV_VAR, raising=False)
+    assert runtime_bundle_file() == SERVING_BUNDLE_FILE
+    monkeypatch.setenv(BUNDLE_ENV_VAR, str(tmp_path / "demo.joblib"))
+    assert runtime_bundle_file() == tmp_path / "demo.joblib"

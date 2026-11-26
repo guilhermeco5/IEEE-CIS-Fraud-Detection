@@ -58,3 +58,12 @@ class FraudPrediction(BaseModel):
     ignored_features: list[str] = Field(
         default_factory=list, description="Campos de `features` não usados, com o motivo"
     )
+
+
+class Meta(BaseModel):
+    """O que a interface precisa saber do servidor, para não repetir listas no front-end."""
+
+    demo_mode: bool = Field(..., description="Se verdadeiro, o servidor nunca grava transações no histórico")
+    categories: dict[str, list[str]] = Field(..., description="Valores aceitos das colunas categóricas principais")
+    demo_cards: list[int] = Field(..., description="Cartões com histórico no bundle (os demais contam como cartão novo)")
+    thresholds: dict[str, float] = Field(..., description="Limiares do score: `alto` (FPR 1%) e `medio` (FPR 5%)")

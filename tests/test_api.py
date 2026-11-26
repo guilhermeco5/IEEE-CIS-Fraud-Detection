@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
+from src.config import DEMO_MODE_ENV_VAR
 from src.serving import FraudScorer
 
 VALID = {
@@ -19,6 +20,16 @@ VALID = {
 def client(scorer, monkeypatch):
     """Cliente com o scorer sintético no lugar dos artefatos reais de models/."""
     monkeypatch.setattr(FraudScorer, "load", lambda *a, **k: scorer)
+    monkeypatch.delenv(DEMO_MODE_ENV_VAR, raising=False)
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture
+def demo_client(scorer, monkeypatch):
+    """Mesmo cliente, com o servidor em modo demonstração (FRAUD_DEMO_MODE=1)."""
+    monkeypatch.setattr(FraudScorer, "load", lambda *a, **k: scorer)
+    monkeypatch.setenv(DEMO_MODE_ENV_VAR, "1")
     with TestClient(app) as c:
         yield c
 
@@ -109,3 +120,32 @@ def test_503_with_actionable_message_when_artifacts_are_missing(client_without_a
 def test_openapi_documents_the_request_example(client):
     schema = client.get("/openapi.json").json()["components"]["schemas"]["TransactionRequest"]
     assert schema["example"]["card1"] == 13926
+
+
+def test_demo_mode_ignores_record_true(demo_client):
+    def n_transactions():
+        return demo_client.get("/health").json()["transactions_in_history"]
+
+    assert demo_client.get("/health").json()["demo_mode"] is True
+    before = n_transactions()
+    assert demo_client.post("/predict?record=true", json=VALID).status_code == 200
+    assert demo_client.post("/predict", json=VALID).status_code == 200  # padrão também é record=true
+    assert n_transactions() == before
+
+
+def test_normal_mode_reports_demo_mode_off(client):
+    assert client.get("/health").json()["demo_mode"] is False
+
+
+def test_meta_exposes_what_the_form_needs(client, scorer):
+    body = client.get("/meta").json()
+    assert set(body) == {"demo_mode", "categories", "demo_cards", "thresholds"}
+    assert body["demo_mode"] is False
+    assert set(body["categories"]["ProductCD"]) == {"W", "C", "H"}
+    assert set(body["categories"]) <= {"ProductCD", "card4", "card6", "P_emaildomain", "DeviceType"}
+    assert body["thresholds"] == scorer.thresholds
+    assert body["demo_cards"] == scorer.demo_cards == []  # o bundle sintético não é de demo
+
+
+def test_meta_is_503_without_artifacts(client_without_artifacts):
+    assert client_without_artifacts.get("/meta").status_code == 503

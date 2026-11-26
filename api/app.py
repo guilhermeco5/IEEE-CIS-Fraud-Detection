@@ -7,18 +7,26 @@ Pré-requisito: `python -m src.train` e `python -m src.serving` (geram o modelo
 e o bundle em models/). Toda a lógica de features vive em `src/serving.py`.
 """
 
+import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
-from api.schemas import FraudPrediction, TransactionRequest
-from src.serving import FraudScorer
+from api.schemas import FraudPrediction, Meta, TransactionRequest
+from src.config import DEMO_MODE_ENV_VAR
+from src.serving import META_CATEGORY_COLUMNS, FraudScorer
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Carrega modelo e bundle uma vez. Se faltarem, a API sobe e responde 503 com o motivo."""
+    """Carrega modelo e bundle uma vez. Se faltarem, a API sobe e responde 503 com o motivo.
+
+    `FRAUD_DEMO_MODE=1` (demo pública): o servidor nunca grava transações no histórico,
+    mesmo que o cliente peça `record=true`. Sem autenticação, qualquer um poderia poluir
+    o histórico dos cartões de demonstração.
+    """
+    app.state.demo_mode = os.environ.get(DEMO_MODE_ENV_VAR, "").strip().lower() in {"1", "true", "yes"}
     app.state.scorer, app.state.load_error = None, None
     try:
         app.state.scorer = FraudScorer.load()
@@ -51,14 +59,27 @@ def health_check(request: Request):
     return {
         "status": "ok",
         "model_loaded": True,
+        "demo_mode": request.app.state.demo_mode,
         "cards_in_history": scorer.history.n_cards,
         "transactions_in_history": scorer.history.n_transactions,
     }
 
 
+@app.get("/meta", response_model=Meta)
+def meta(request: Request, scorer: FraudScorer = Depends(get_scorer)):
+    """Opções para o formulário da demo: categorias aceitas, cartões de demo e limiares."""
+    return Meta(
+        demo_mode=request.app.state.demo_mode,
+        categories={c: [str(v) for v in scorer.categories[c]] for c in META_CATEGORY_COLUMNS if c in scorer.categories},
+        demo_cards=scorer.demo_cards,
+        thresholds=scorer.thresholds,
+    )
+
+
 @app.post("/predict", response_model=FraudPrediction)
 def predict(
     transaction: TransactionRequest,
+    request: Request,
     record: bool = True,
     scorer: FraudScorer = Depends(get_scorer),
 ):
@@ -66,7 +87,8 @@ def predict(
 
     Com `record=true` (padrão) a transação entra no histórico do cartão e passa a
     contar nas features de velocidade e agregação das próximas. Use `record=false`
-    para só consultar, sem alterar o estado. O histórico vive na memória do
+    para só consultar, sem alterar o estado. Em modo demo (`FRAUD_DEMO_MODE=1`) o servidor
+    ignora `record=true` e nunca grava. O histórico vive na memória do
     processo (ver docs/metodologia.md, seção 7).
 
     É uma função síncrona de propósito: o cálculo é CPU-bound e o FastAPI o executa
@@ -79,6 +101,6 @@ def predict(
         product_cd=transaction.product_cd,
         features=transaction.features,
         transaction_id=transaction.transaction_id,
-        record=record,
+        record=record and not request.app.state.demo_mode,
     )
     return FraudPrediction(**asdict(result))

@@ -19,9 +19,11 @@ depois do bundle.
 from __future__ import annotations
 
 import argparse
+import os
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import joblib
 import numpy as np
@@ -30,10 +32,13 @@ import xgboost as xgb
 
 from src.config import (
     AMOUNT_COLUMN,
+    BUNDLE_ENV_VAR,
+    DEMO_CARDS,
     ENTITY_COLUMN,
     ID_COLUMN,
     RANDOM_STATE,
     SERVING_BUNDLE_FILE,
+    SERVING_DEMO_BUNDLE_FILE,
     SERVING_MEDIUM_RISK_FPR,
     TARGET_COLUMN,
     TARGET_FPR_FOR_RECALL,
@@ -52,6 +57,9 @@ from src.features import (
 PRODUCT_COLUMN = "ProductCD"
 # Colunas que vêm dos campos obrigatórios do request, não do dict `features`.
 RESERVED_COLUMNS = {ID_COLUMN, TEMPORAL_SPLIT_COLUMN, AMOUNT_COLUMN, ENTITY_COLUMN, PRODUCT_COLUMN, TARGET_COLUMN}
+
+# Colunas categóricas que o formulário da demo oferece como lista de opções.
+META_CATEGORY_COLUMNS = (PRODUCT_COLUMN, "card4", "card6", "P_emaildomain", "DeviceType")
 
 _EMPTY_TIMES = np.empty(0, dtype=np.int64)
 _EMPTY_AMOUNTS = np.empty(0, dtype=np.float32)
@@ -130,6 +138,7 @@ class FraudScorer:
         self.categories: dict[str, list] = bundle["categories"]
         self.freq_encoder = bundle["freq_encoder"]
         self.thresholds: dict[str, float] = bundle["thresholds"]
+        self.demo_cards: list[int] = list(bundle.get("demo_cards", []))
         self.history = history if history is not None else HistoryStore(bundle["history"])
         self._raw_set = set(self.raw_columns)
         self._category_sets = {c: set(v) for c, v in self.categories.items()}
@@ -140,7 +149,8 @@ class FraudScorer:
             raise ValueError("O bundle não corresponde ao modelo (colunas diferentes). Rode `python -m src.serving`.")
 
     @classmethod
-    def load(cls, model_path=XGBOOST_MODEL_FILE, bundle_path=SERVING_BUNDLE_FILE) -> FraudScorer:
+    def load(cls, model_path=XGBOOST_MODEL_FILE, bundle_path=None) -> FraudScorer:
+        bundle_path = Path(bundle_path) if bundle_path else runtime_bundle_file()
         missing = [p for p in (model_path, bundle_path) if not p.exists()]
         if missing:
             raise FileNotFoundError(
@@ -274,6 +284,14 @@ class FraudScorer:
         )
 
 
+def runtime_bundle_file() -> Path:
+    """Bundle a carregar: `FRAUD_BUNDLE_FILE` se definida (a imagem Docker aponta para o de demo), senão o completo.
+
+    Lida na hora da chamada, não na importação, para os testes poderem trocá-la.
+    """
+    return Path(os.environ.get(BUNDLE_ENV_VAR) or SERVING_BUNDLE_FILE)
+
+
 # --- geração do bundle e checagem de paridade ---
 
 
@@ -305,6 +323,29 @@ def build_bundle(model_path=XGBOOST_MODEL_FILE) -> dict:
         "freq_encoder": fit_frequency_encoder(train_df),
         "history": history.to_dict(),
         "thresholds": thresholds,
+    }
+
+
+def build_demo_bundle(bundle: dict, cards=DEMO_CARDS) -> dict:
+    """Bundle de demonstração: o histórico e o encoder de `card1` só dos `cards` pedidos.
+
+    Cartões fora da lista passam a se comportar como cartão novo: sem histórico
+    (n_prev = 0, médias NaN) e `card1_freq` = 0 (nunca visto). O resto do bundle
+    (colunas, categorias, limiares e as frequências de e-mail, dispositivo e
+    navegador) são agregados e ficam como estão.
+    """
+    cards = [int(c) for c in cards]
+    missing = [c for c in cards if c not in bundle["history"]]
+    if missing:
+        raise ValueError(f"Cartões sem histórico no bundle completo: {missing}")
+    encoder = dict(bundle["freq_encoder"])
+    if ENTITY_COLUMN in encoder:
+        encoder[ENTITY_COLUMN] = encoder[ENTITY_COLUMN][encoder[ENTITY_COLUMN].index.isin(cards)]
+    return {
+        **bundle,
+        "history": {c: bundle["history"][c] for c in cards},
+        "freq_encoder": encoder,
+        "demo_cards": cards,
     }
 
 
@@ -361,7 +402,18 @@ def check_parity(scorer: FraudScorer, test_df: pd.DataFrame, n: int = 300, seed:
     }
 
 
-def main(check: bool = False, n: int = 300) -> None:
+def main(check: bool = False, n: int = 300, demo: bool = False) -> None:
+    if demo:
+        if not SERVING_BUNDLE_FILE.exists():
+            raise SystemExit(f"{SERVING_BUNDLE_FILE} não existe. Rode `python -m src.serving` antes.")
+        bundle = build_demo_bundle(joblib.load(SERVING_BUNDLE_FILE))
+        joblib.dump(bundle, SERVING_DEMO_BUNDLE_FILE, compress=3)
+        history = HistoryStore(bundle["history"])
+        print(f"Bundle de demo salvo em {SERVING_DEMO_BUNDLE_FILE} "
+              f"({SERVING_DEMO_BUNDLE_FILE.stat().st_size / 1e6:.2f} MB)")
+        print(f"  cartões: {bundle['demo_cards']} | {history.n_transactions} transações no histórico")
+        print(f"  encoder de card1: {len(bundle['freq_encoder'][ENTITY_COLUMN])} cartões")
+        return
     if check:
         from src.train import load_feature_data
 
@@ -392,5 +444,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="compara o serving com o batch em linhas reais do teste")
     parser.add_argument("-n", type=int, default=300, help="linhas da checagem de paridade")
+    parser.add_argument("--demo", action="store_true", help="gera o bundle de demonstração a partir do completo")
     args = parser.parse_args()
-    main(check=args.check, n=args.n)
+    main(check=args.check, n=args.n, demo=args.demo)

@@ -95,6 +95,20 @@ SERVING_BUNDLE_FILE = MODELS_DIR / "serving_bundle.joblib"
 # (o mesmo ponto de operação das métricas), "médio" este FPR maior.
 SERVING_MEDIUM_RISK_FPR = 0.05
 
+# --- Deploy (Semana 6) ---
+# Bundle de demonstração: o mesmo formato, mas com o histórico restrito aos
+# cartões abaixo (e o encoder de card1 também). É o único que vai ao git e à
+# imagem pública; o bundle completo contém dados de todas as 590 mil transações.
+SERVING_DEMO_BUNDLE_FILE = MODELS_DIR / "serving_bundle_demo.joblib"
+# Três perfis distintos, ~370 transações no total:
+#   11555: 56 transações, 6 na última hora do histórico (rajada recente)
+#    5646: 49 transações, valor médio ~640 (ticket alto)
+#    3653: 264 transações, valor médio ~17 e estável (ticket baixo)
+DEMO_CARDS = (11555, 5646, 3653)
+# Variáveis de ambiente lidas na subida do processo (ver Dockerfile e render.yaml).
+BUNDLE_ENV_VAR = "FRAUD_BUNDLE_FILE"  # caminho do bundle a carregar (padrão: SERVING_BUNDLE_FILE)
+DEMO_MODE_ENV_VAR = "FRAUD_DEMO_MODE"  # "1": o servidor nunca grava transações no histórico
+
 # --- Avaliação ---
 # Recall reportado a este FPR fixo, métrica de negócio relevante para fraude
 TARGET_FPR_FOR_RECALL = 0.01
