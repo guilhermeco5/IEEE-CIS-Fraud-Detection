@@ -108,6 +108,9 @@ DEMO_CARDS = (11555, 5646, 3653)
 # Variáveis de ambiente lidas na subida do processo (ver Dockerfile e render.yaml).
 BUNDLE_ENV_VAR = "FRAUD_BUNDLE_FILE"  # caminho do bundle a carregar (padrão: SERVING_BUNDLE_FILE)
 DEMO_MODE_ENV_VAR = "FRAUD_DEMO_MODE"  # "1": o servidor nunca grava transações no histórico
+# Transação de referência da demo: mediana (numéricas) ou moda (categóricas) das colunas
+# que faltam em no máximo esta fração do treino. As demais ficam ausentes.
+REFERENCE_MAX_MISSING_RATE = 0.5
 
 # --- Avaliação ---
 # Recall reportado a este FPR fixo, métrica de negócio relevante para fraude

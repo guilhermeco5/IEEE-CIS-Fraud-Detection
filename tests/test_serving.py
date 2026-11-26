@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from src.config import BUNDLE_ENV_VAR, SERVING_BUNDLE_FILE
-from src.serving import FraudScorer, HistoryStore, build_demo_bundle, runtime_bundle_file
+from src.serving import FraudScorer, HistoryStore, build_demo_bundle, runtime_bundle_file, typical_values
 
 
 def _payload(row: pd.Series, raw_columns) -> dict:
@@ -190,3 +190,35 @@ def test_runtime_bundle_file_follows_env_at_call_time(monkeypatch, tmp_path):
     assert runtime_bundle_file() == SERVING_BUNDLE_FILE
     monkeypatch.setenv(BUNDLE_ENV_VAR, str(tmp_path / "demo.joblib"))
     assert runtime_bundle_file() == tmp_path / "demo.joblib"
+
+
+def test_typical_values_use_median_mode_and_skip_sparse_or_reserved_columns():
+    df = pd.DataFrame({
+        "TransactionAmt": [1.0, 2.0, 3.0],
+        "num": [1.0, 2.0, 100.0],                                   # mediana 2.0
+        "cat": pd.Categorical(["a", "b", "b"]),                     # moda "b"
+        "sparse": [np.nan, np.nan, 5.0],                            # 67% ausente: fora
+        "half": [np.nan, 4.0, 6.0],                                 # 33% ausente: entra
+    })
+    out = typical_values(df, list(df.columns), max_missing=0.5)
+    assert out == {"num": 2.0, "cat": "b", "half": 5.0}  # "TransactionAmt" é reservada; "sparse" é esparsa
+
+
+def test_reference_features_are_fully_accepted_by_the_scorer(scorer):
+    """A transação de referência não pode gerar campos ignorados (nome ou categoria inválidos)."""
+    assert scorer.reference_features
+    reference = {k: v for k, v in scorer.reference_features.items() if k != "ProductCD"}
+    result = scorer.score(transaction_dt=10_000, transaction_amt=50.0, card1=1000, product_cd="W",
+                          features=reference, record=False)
+    assert result.ignored_features == []
+
+
+def test_demo_card_stats_summarize_each_card_history(world):
+    model, bundle, *_ = world
+    demo = build_demo_bundle(bundle, cards=[1000, 1001])
+    scorer = FraudScorer(model, demo, history=HistoryStore(dict(demo["history"])))
+    stats = {row["card1"]: row for row in scorer.demo_card_stats()}
+    for card in (1000, 1001):
+        times, amounts = demo["history"][card]
+        assert stats[card] == {"card1": card, "n_transactions": len(times), "last_dt": int(times[-1]),
+                               "mean_amt": round(float(amounts.mean()), 2)}

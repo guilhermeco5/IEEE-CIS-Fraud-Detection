@@ -10,8 +10,10 @@ e o bundle em models/). Toda a lógica de features vive em `src/serving.py`.
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from api.schemas import FraudPrediction, Meta, TransactionRequest
 from src.config import DEMO_MODE_ENV_VAR
@@ -43,6 +45,15 @@ app = FastAPI(
 )
 
 
+INDEX_PAGE = Path(__file__).parent / "static" / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    """Página de demonstração (HTML único, sem dependências externas). Usa /meta e /predict."""
+    return FileResponse(INDEX_PAGE, media_type="text/html")
+
+
 def get_scorer(request: Request) -> FraudScorer:
     scorer = request.app.state.scorer
     if scorer is None:
@@ -67,11 +78,12 @@ def health_check(request: Request):
 
 @app.get("/meta", response_model=Meta)
 def meta(request: Request, scorer: FraudScorer = Depends(get_scorer)):
-    """Opções para o formulário da demo: categorias aceitas, cartões de demo e limiares."""
+    """Opções para o formulário da demo: categorias aceitas, cartões de demo, transação de referência e limiares."""
     return Meta(
         demo_mode=request.app.state.demo_mode,
         categories={c: [str(v) for v in scorer.categories[c]] for c in META_CATEGORY_COLUMNS if c in scorer.categories},
-        demo_cards=scorer.demo_cards,
+        demo_cards=scorer.demo_card_stats(),
+        reference_features=scorer.reference_features,
         thresholds=scorer.thresholds,
     )
 

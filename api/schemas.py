@@ -60,10 +60,22 @@ class FraudPrediction(BaseModel):
     )
 
 
+class DemoCard(BaseModel):
+    card1: int
+    n_transactions: int = Field(..., description="Transações no histórico deste cartão")
+    last_dt: int = Field(..., description="TransactionDT da última transação do histórico")
+    mean_amt: float = Field(..., description="Valor médio das transações do histórico")
+
+
 class Meta(BaseModel):
     """O que a interface precisa saber do servidor, para não repetir listas no front-end."""
 
     demo_mode: bool = Field(..., description="Se verdadeiro, o servidor nunca grava transações no histórico")
     categories: dict[str, list[str]] = Field(..., description="Valores aceitos das colunas categóricas principais")
-    demo_cards: list[int] = Field(..., description="Cartões com histórico no bundle (os demais contam como cartão novo)")
+    demo_cards: list[DemoCard] = Field(
+        ..., description="Cartões com histórico no bundle (os demais contam como cartão novo)"
+    )
+    reference_features: dict[str, float | str] = Field(
+        ..., description="Transação de referência: valor típico (mediana/moda no treino) das colunas que raramente faltam"
+    )
     thresholds: dict[str, float] = Field(..., description="Limiares do score: `alto` (FPR 1%) e `medio` (FPR 5%)")

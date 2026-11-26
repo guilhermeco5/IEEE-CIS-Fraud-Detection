@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detecção de fraude: demonstração</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f6f9; --panel: #ffffff; --text: #1b2430; --muted: #566274; --border: #d5dbe3;
+    --accent: #1f52c2; --accent-text: #ffffff; --pos: #b83227; --neg: #1d6aa8;
+    --low: #1c7a4a; --mid: #946200; --high: #b83227; --track: #e4e8ee; --focus: #1f52c2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151b; --panel: #1a212a; --text: #e5e9ef; --muted: #9ba7b7; --border: #2c3643;
+      --accent: #78a2ff; --accent-text: #0d1320; --pos: #ff8576; --neg: #72b8ff;
+      --low: #58c98c; --mid: #e3b341; --high: #ff8576; --track: #2a3340; --focus: #78a2ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  p { margin: 0 0 8px; }
+  .muted { color: var(--muted); font-size: .92rem; }
+  .banner { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+            border-radius: 8px; padding: 12px 16px; margin: 16px 0 20px; }
+  .banner ul { margin: 6px 0 0; padding-left: 20px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 880px) { .grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+  section.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
+           padding: 7px 12px; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600;
+                   padding: 10px 18px; }
+  button[disabled] { opacity: .6; cursor: progress; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  #preset-note { min-height: 2.9em; }
+  form { display: grid; gap: 12px; }
+  .row { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+  label { display: grid; gap: 4px; font-size: .92rem; font-weight: 600; }
+  label small { font-weight: 400; color: var(--muted); }
+  input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+                            background: var(--bg); }
+  textarea { min-height: 70px; font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
+  .check input { width: auto; margin-top: 5px; }
+  #result:focus { outline: none; }
+  .tier { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; border: 2px solid; }
+  .tier.baixo { color: var(--low); border-color: var(--low); }
+  .tier.médio { color: var(--mid); border-color: var(--mid); }
+  .tier.alto { color: var(--high); border-color: var(--high); }
+  .score { font-size: 2.4rem; font-weight: 700; line-height: 1.1; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+  .meter { position: relative; height: 12px; border-radius: 6px; background: var(--track); margin: 30px 0 26px; }
+  .meter .tick { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--muted); }
+  .meter .tick span { position: absolute; top: 20px; transform: translateX(-50%); font-size: .75rem; color: var(--muted);
+                      white-space: nowrap; }
+  .meter .marker { position: absolute; top: -7px; width: 6px; height: 26px; border-radius: 3px; background: var(--accent);
+                   transform: translateX(-50%); }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px 6px; }
+  td { padding: 6px; border-top: 1px solid var(--border); vertical-align: middle; }
+  td.val { max-width: 150px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .bar { position: relative; height: 14px; min-width: 120px; background: var(--track); border-radius: 3px; }
+  .bar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
+  .bar .fill { position: absolute; top: 0; bottom: 0; }
+  .bar .fill.pos { left: 50%; background: var(--pos); border-radius: 0 3px 3px 0; }
+  .bar .fill.neg { right: 50%; background: var(--neg); border-radius: 3px 0 0 3px; }
+  td.shap { white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+  .error { border: 1px solid var(--high); border-radius: 8px; padding: 10px 12px; color: var(--high); }
+  .legend { display: flex; gap: 14px; font-size: .82rem; color: var(--muted); margin: 6px 0 0; flex-wrap: wrap; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; font-weight: 600; }
+  footer { margin-top: 24px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Detecção de fraude em transações</h1>
+  <p class="muted">Demonstração de um XGBoost treinado no dataset IEEE-CIS Fraud Detection, com explicação SHAP de cada score.</p>
+
+  <div class="banner" role="note">
+    <strong>Leia antes de testar</strong>
+    <ul>
+      <li>Os exemplos são <strong>sintéticos</strong>: valores típicos do treino com alterações pontuais. Não são transações reais.</li>
+      <li>O <strong>score não é uma probabilidade calibrada</strong>: serve para ordenar transações e comparar com os limiares.</li>
+      <li id="demo-note">Carregando configuração do servidor…</li>
+    </ul>
+  </div>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="h-form">
+      <h2 id="h-form">1. Escolha ou monte uma transação</h2>
+      <div class="presets" id="presets" role="group" aria-label="Exemplos prontos"></div>
+      <p class="muted" id="preset-note" aria-live="polite">Escolha um exemplo ou edite os campos abaixo.</p>
+
+      <form id="form" novalidate>
+        <div class="row">
+          <label for="card">Cartão (card1)
+            <select id="card"></select>
+            <small id="card-hint">&nbsp;</small>
+          </label>
+          <label for="card-other">Outro cartão
+            <input id="card-other" type="number" min="0" step="1" placeholder="ex: 99999" disabled>
+            <small>Sem histórico: conta como cartão novo.</small>
+          </label>
+        </div>
+        <div class="row">
+          <label for="amt">Valor (TransactionAmt)
+            <input id="amt" type="number" min="0.01" step="any" value="59" required>
+          </label>
+          <label for="dt">Instante (TransactionDT)
+            <input id="dt" type="number" min="0" step="1" required>
+            <small>Segundos desde a referência do dataset.</small>
+          </label>
+        </div>
+        <div class="row" id="selects"></div>
+        <label for="extra">Outras colunas, em JSON <small>(ex: {"C1": 86, "V258": 4})</small>
+          <textarea id="extra" spellcheck="false" placeholder="{}"></textarea>
+        </label>
+        <label class="check" for="typical">
+          <input id="typical" type="checkbox" checked>
+          <span>Preencher as demais colunas com o valor típico do treino (recomendado)
+            <small>Colunas como C1 a C14 nunca faltam nos dados reais. Se chegarem ausentes, o modelo as lê como
+            sinal de transação legítima e o score cai perto de zero, qualquer que seja o resto.</small></span>
+        </label>
+        <div><button class="primary" id="submit" type="submit">Pontuar transação</button></div>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="h-result">
+      <h2 id="h-result">2. Resultado</h2>
+      <div id="result" tabindex="-1" aria-live="polite" aria-busy="false">
+        <p class="muted">Nenhuma transação pontuada ainda.</p>
+      </div>
+      <details>
+        <summary>Como ler o resultado</summary>
+        <p class="muted">O <strong>score</strong> é a saída do modelo. A <strong>faixa</strong> vem de dois limiares calculados
+        no conjunto de teste: <em>alto</em> acima do limiar em que 1% das transações legítimas seriam bloqueadas,
+        <em>médio</em> acima do de 5%.</p>
+        <p class="muted">Cada linha da tabela é uma feature e sua contribuição <strong>SHAP</strong>, em log-odds: positiva
+        (vermelho) empurra o score para fraude, negativa (azul) para legítima. As cinco de maior peso aparecem.</p>
+        <p class="muted">Em modelos de árvore, uma feature ausente também é informação: por isso o valor "ausente" pode
+        aparecer entre os fatores.</p>
+      </details>
+    </section>
+  </div>
+
+  <footer class="muted">
+    API: <a href="/docs">documentação interativa (Swagger)</a>.
+    Metodologia, limitações e a verificação de que esta API calcula as features como o treino estão no repositório do projeto.
+  </footer>
+</main>
+
+<script>
+"use strict";
+const SELECT_FIELDS = [["ProductCD", "ProductCD"], ["card4", "Bandeira (card4)"], ["card6", "Tipo (card6)"],
+                       ["P_emaildomain", "E-mail do comprador"], ["DeviceType", "Tipo de dispositivo"]];
+const OTHER = "other";
+
+// Exemplos sintéticos. `dtOffset` é em segundos depois da última transação do histórico do cartão.
+// Cada um só descreve o que mostra; o score vem do servidor.
+const PRESETS = [
+  { name: "Compra comum", card: 3653, dtOffset: 3600, amt: 15, overrides: {},
+    note: "Valores típicos do treino em um cartão de ticket baixo (média do histórico em torno de 17)." },
+  { name: "Valor atípico", card: 3653, dtOffset: 3600, amt: 450, overrides: {},
+    note: "O mesmo cartão com um valor muitas vezes maior que a média do histórico. Veja como o valor pesa nos fatores." },
+  { name: "Rajada recente", card: 11555, dtOffset: 120, amt: 80, overrides: {},
+    note: "Cartão com 6 transações na última hora do histórico (card1_cnt_1h = 6), 2 minutos depois da última." },
+  { name: "Mesma compra, 2 dias depois", card: 11555, dtOffset: 172800, amt: 80, overrides: {},
+    note: "A mesma transação sem a rajada. Compare com o exemplo anterior: o score quase não muda, porque as features de velocidade pesam pouco no modelo (metodologia, seção 6)." },
+  { name: "Perfil de risco", card: 11555, dtOffset: 11562, amt: 59,
+    overrides: { DeviceType: "mobile", R_emaildomain: "gmail.com", C1: 86, C11: 54, V258: 4, V45: 9, V87: 4,
+                 DeviceInfo: "SM-G920P Build/NRD90M", id_31: "chrome 66.0 for android" },
+    note: "Perfil sintético com sinais que o modelo associou a fraude nos dados de treino: aparelho Android, C1 e C11 altos." },
+];
+
+const $ = (id) => document.getElementById(id);
+let meta = null;
+const selects = {};
+
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") node.className = v; else if (k === "text") node.textContent = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+function formatValue(v) {
+  if (v === null || v === undefined) return "ausente";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(5)));
+  return String(v);
+}
+
+function demoCard(id) { return meta.demo_cards.find((c) => c.card1 === id); }
+
+function buildForm() {
+  const card = $("card");
+  for (const c of meta.demo_cards) {
+    card.append(el("option", { value: c.card1, text: `${c.card1} · ${c.n_transactions} transações` }));
+  }
+  card.append(el("option", { value: OTHER, text: "Outro (cartão novo)" }));
+  card.addEventListener("change", onCardChange);
+
+  for (const [name, label] of SELECT_FIELDS) {
+    const options = meta.categories[name];
+    if (!options) continue;
+    const select = el("select", { id: `f-${name}` });
+    select.append(el("option", { value: "", text: "(ausente)" }));
+    for (const o of options) select.append(el("option", { value: o, text: o }));
+    selects[name] = select;
+    $("selects").append(el("label", { for: `f-${name}`, text: label }, select));
+  }
+
+  PRESETS.forEach((p, i) => {
+    if (!demoCard(p.card)) return;  // preset de um cartão que não está neste bundle
+    const b = el("button", { type: "button", text: p.name });
+    b.addEventListener("click", () => applyPreset(i));
+    $("presets").append(b);
+  });
+}
+
+function resetSelects() {
+  for (const [name, select] of Object.entries(selects)) {
+    const typical = meta.reference_features[name];
+    select.value = typical !== undefined && [...select.options].some((o) => o.value === typical)
+      ? typical : (name === "ProductCD" ? (meta.categories.ProductCD.includes("W") ? "W" : meta.categories.ProductCD[0]) : "");
+  }
+}
+
+function onCardChange() {
+  const isOther = $("card").value === OTHER;
+  $("card-other").disabled = !isOther;
+  if (!isOther) {
+    const c = demoCard(Number($("card").value));
+    if (c) {
+      $("dt").value = c.last_dt + 3600;
+      $("card-hint").textContent = `Valor médio no histórico: ${c.mean_amt}. Última transação em ${c.last_dt}.`;
+    }
+  } else {
+    $("card-hint").textContent = "Cartão sem histórico: conta como cartão novo.";
+    if (!$("dt").value) $("dt").value = 15800000;
+  }
+}
+
+function applyPreset(i) {
+  const p = PRESETS[i];
+  $("card").value = String(p.card);
+  onCardChange();
+  $("dt").value = demoCard(p.card).last_dt + p.dtOffset;
+  $("amt").value = p.amt;
+  resetSelects();
+  const extra = {};
+  for (const [k, v] of Object.entries(p.overrides)) {
+    if (selects[k]) selects[k].value = String(v); else extra[k] = v;
+  }
+  $("extra").value = Object.keys(extra).length ? JSON.stringify(extra) : "";
+  $("typical").checked = true;
+  $("preset-note").textContent = p.note;
+}
+
+function buildPayload() {
+  const card = $("card").value === OTHER ? Number($("card-other").value) : Number($("card").value);
+  const features = $("typical").checked ? { ...meta.reference_features } : {};
+  for (const [name, select] of Object.entries(selects)) {
+    if (name !== "ProductCD") features[name] = select.value === "" ? null : select.value;
+  }
+  const raw = $("extra").value.trim();
+  if (raw) {
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { throw new Error("O JSON das outras colunas é inválido: " + e.message); }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("As outras colunas devem ser um objeto JSON, como {\"C1\": 86}.");
+    }
+    Object.assign(features, parsed);
+  }
+  return {
+    transaction_dt: Number($("dt").value), transaction_amt: Number($("amt").value), card1: card,
+    product_cd: selects.ProductCD ? selects.ProductCD.value : "W", features,
+  };
+}
+
+function showError(messages) {
+  const box = el("div", { class: "error", role: "alert" }, el("strong", { text: "Não foi possível pontuar" }));
+  const list = el("ul");
+  for (const m of messages) list.append(el("li", { text: m }));
+  box.append(list);
+  $("result").replaceChildren(box);
+}
+
+function renderResult(r) {
+  const out = $("result");
+  const above = r.is_fraud_flag;
+  const meter = el("div", { class: "meter", role: "img",
+    "aria-label": `Score ${r.fraud_score.toFixed(4)} em uma escala de 0 a 1; limiares em ${meta.thresholds.medio.toFixed(2)} e ${meta.thresholds.alto.toFixed(2)}` });
+  for (const [label, t] of [["médio", meta.thresholds.medio], ["alto", meta.thresholds.alto]]) {
+    meter.append(el("div", { class: "tick", style: `left:${t * 100}%` }, el("span", { text: `${label} ${t.toFixed(2)}` })));
+  }
+  meter.append(el("div", { class: "marker", style: `left:${Math.min(Math.max(r.fraud_score, 0), 1) * 100}%` }));
+
+  const maxAbs = Math.max(...r.top_factors.map((f) => Math.abs(f.shap)), 1e-9);
+  const tbody = el("tbody");
+  for (const f of r.top_factors) {
+    const half = (Math.abs(f.shap) / maxAbs) * 50;
+    const fill = el("span", { class: `fill ${f.shap >= 0 ? "pos" : "neg"}`, style: `width:${half}%` });
+    tbody.append(el("tr", {},
+      el("td", { text: f.feature }),
+      el("td", { class: "val", text: formatValue(f.value) }),
+      el("td", {}, el("div", { class: "bar", "aria-hidden": "true" }, fill)),
+      el("td", { class: "shap", text: (f.shap >= 0 ? "+" : "−") + Math.abs(f.shap).toFixed(2) })));
+  }
+  const table = el("table", {},
+    el("caption", { class: "muted", text: "As 5 features que mais pesaram neste score", style: "text-align:left;padding-bottom:4px" }),
+    el("thead", {}, el("tr", {}, el("th", { text: "Feature" }), el("th", { text: "Valor" }),
+      el("th", { text: "Efeito" }), el("th", { text: "SHAP" }))),
+    tbody);
+
+  const legend = el("p", { class: "legend" },
+    el("span", {}, Object.assign(el("span", { class: "sw" }), { style: "background:var(--pos)" }), "empurra para fraude (+)"),
+    el("span", {}, Object.assign(el("span", { class: "sw" }), { style: "background:var(--neg)" }), "empurra para legítima (−)"));
+
+  const nodes = [
+    el("span", { class: `tier ${r.risk_tier}`, text: `Risco ${r.risk_tier}` }),
+    el("div", { class: "score", text: r.fraud_score.toFixed(4) }),
+    el("p", { class: "muted", text: above ? `Acima do limiar de decisão (${r.threshold.toFixed(4)}): a transação seria sinalizada.`
+                                           : `Abaixo do limiar de decisão (${r.threshold.toFixed(4)}): não seria sinalizada.` }),
+    meter, table, legend,
+  ];
+  if (r.ignored_features.length) {
+    const list = el("ul");
+    for (const t of r.ignored_features) list.append(el("li", { text: t }));
+    nodes.push(el("details", { open: "" }, el("summary", { text: `${r.ignored_features.length} campo(s) ignorado(s)` }), list));
+  }
+  out.replaceChildren(...nodes);
+}
+
+async function submit(event) {
+  event.preventDefault();
+  const button = $("submit"), out = $("result");
+  let payload;
+  try { payload = buildPayload(); } catch (e) { showError([e.message]); out.focus(); return; }
+  button.disabled = true; out.setAttribute("aria-busy", "true");
+  try {
+    // record=false sempre: esta página nunca altera o histórico dos cartões.
+    const res = await fetch("/predict?record=false", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    const body = await res.json().catch(() => null);
+    if (res.ok) renderResult(body);
+    else if (res.status === 422 && body && Array.isArray(body.detail)) {
+      showError(body.detail.map((d) => `${(d.loc || []).filter((p) => p !== "body").join(".")}: ${d.msg}`));
+    } else showError([body && typeof body.detail === "string" ? body.detail : `Erro ${res.status} do servidor.`]);
+  } catch (e) {
+    showError(["Não consegui falar com o servidor. Se a instância estava ociosa, ela pode estar acordando: tente de novo em alguns segundos."]);
+  } finally {
+    button.disabled = false; out.setAttribute("aria-busy", "false"); out.focus();
+  }
+}
+
+async function init() {
+  try {
+    const res = await fetch("/meta");
+    const body = await res.json();
+    if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : `Erro ${res.status}`);
+    meta = body;
+  } catch (e) {
+    $("demo-note").textContent = "O servidor não carregou o modelo: " + e.message;
+    $("submit").disabled = true;
+    return;
+  }
+  $("demo-note").textContent = meta.demo_mode
+    ? "Modo demonstração: as transações enviadas aqui não são gravadas no histórico dos cartões."
+    : "Esta página sempre consulta sem gravar (record=false) no histórico dos cartões.";
+  buildForm();
+  resetSelects();
+  onCardChange();
+  $("form").addEventListener("submit", submit);
+}
+init();
+</script>
+</body>
+</html>

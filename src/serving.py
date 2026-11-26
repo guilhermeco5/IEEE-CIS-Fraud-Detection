@@ -37,6 +37,7 @@ from src.config import (
     ENTITY_COLUMN,
     ID_COLUMN,
     RANDOM_STATE,
+    REFERENCE_MAX_MISSING_RATE,
     SERVING_BUNDLE_FILE,
     SERVING_DEMO_BUNDLE_FILE,
     SERVING_MEDIUM_RISK_FPR,
@@ -139,6 +140,7 @@ class FraudScorer:
         self.freq_encoder = bundle["freq_encoder"]
         self.thresholds: dict[str, float] = bundle["thresholds"]
         self.demo_cards: list[int] = list(bundle.get("demo_cards", []))
+        self.reference_features: dict[str, float | str] = dict(bundle.get("typical_values", {}))
         self.history = history if history is not None else HistoryStore(bundle["history"])
         self._raw_set = set(self.raw_columns)
         self._category_sets = {c: set(v) for c, v in self.categories.items()}
@@ -158,6 +160,18 @@ class FraudScorer:
                 "Rode `python -m src.train` e depois `python -m src.serving`."
             )
         return cls(joblib.load(model_path), joblib.load(bundle_path))
+
+    def demo_card_stats(self) -> list[dict]:
+        """Resumo do histórico de cada cartão de demo (a interface usa para posicionar os exemplos no tempo)."""
+        stats = []
+        for card in self.demo_cards:
+            times, amounts = self.history.get(card)
+            if len(times):
+                stats.append({
+                    "card1": int(card), "n_transactions": int(len(times)),
+                    "last_dt": int(times[-1]), "mean_amt": round(float(amounts.mean()), 2),
+                })
+        return stats
 
     # --- construção da linha de features ---
 
@@ -321,9 +335,34 @@ def build_bundle(model_path=XGBOOST_MODEL_FILE) -> dict:
         "raw_columns": raw_columns,
         "categories": categories,
         "freq_encoder": fit_frequency_encoder(train_df),
+        "typical_values": typical_values(train_df, raw_columns),
         "history": history.to_dict(),
         "thresholds": thresholds,
     }
+
+
+def typical_values(
+    df: pd.DataFrame, columns: list[str], max_missing: float = REFERENCE_MAX_MISSING_RATE
+) -> dict[str, float | str]:
+    """Mediana (numéricas) ou moda (categóricas) das colunas que raramente faltam.
+
+    Serve de transação de referência para a demo. Importa porque colunas que quase
+    nunca faltam nos dados reais (C1 a C14, D1, ...) chegam ausentes num payload
+    esparso, e o modelo trata ausência dessas colunas como forte sinal de transação
+    legítima (SHAP de -2.0 em `C3`, por exemplo). Um payload só com alguns campos fica
+    fora da distribuição de treino e pontua perto de zero, seja qual for o risco.
+    São agregados (um valor por coluna), não linhas do dataset.
+    """
+    out: dict[str, float | str] = {}
+    for col in columns:
+        if col in RESERVED_COLUMNS:
+            continue
+        series = df[col]
+        if series.isna().mean() > max_missing:
+            continue
+        values = series.dropna()
+        out[col] = str(values.mode().iloc[0]) if isinstance(series.dtype, pd.CategoricalDtype) else float(values.median())
+    return out
 
 
 def build_demo_bundle(bundle: dict, cards=DEMO_CARDS) -> dict:

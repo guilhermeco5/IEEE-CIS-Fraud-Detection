@@ -139,13 +139,29 @@ def test_normal_mode_reports_demo_mode_off(client):
 
 def test_meta_exposes_what_the_form_needs(client, scorer):
     body = client.get("/meta").json()
-    assert set(body) == {"demo_mode", "categories", "demo_cards", "thresholds"}
+    assert set(body) == {"demo_mode", "categories", "demo_cards", "reference_features", "thresholds"}
     assert body["demo_mode"] is False
     assert set(body["categories"]["ProductCD"]) == {"W", "C", "H"}
     assert set(body["categories"]) <= {"ProductCD", "card4", "card6", "P_emaildomain", "DeviceType"}
     assert body["thresholds"] == scorer.thresholds
-    assert body["demo_cards"] == scorer.demo_cards == []  # o bundle sintético não é de demo
+    assert body["demo_cards"] == [] and scorer.demo_cards == []  # o bundle sintético não é de demo
+    assert body["reference_features"] == scorer.reference_features and body["reference_features"]
 
 
 def test_meta_is_503_without_artifacts(client_without_artifacts):
     assert client_without_artifacts.get("/meta").status_code == 503
+
+
+def test_index_page_is_served_and_calls_existing_endpoints(client_without_artifacts):
+    """A página abre mesmo sem artefatos (ela mesma mostra o erro do /meta) e só usa rotas que existem."""
+    response = client_without_artifacts.get("/")
+    assert response.status_code == 200 and response.headers["content-type"].startswith("text/html")
+    html = response.text
+    assert "fetch(\"/meta\")" in html and "/predict?record=false" in html
+    routes = {r.path for r in app.routes}
+    assert {"/meta", "/predict"} <= routes
+    assert "http://" not in html.replace("http://127", "") and "https://" not in html  # sem CDN nem recurso externo
+
+
+def test_index_page_is_hidden_from_openapi(client):
+    assert "/" not in client.get("/openapi.json").json()["paths"]

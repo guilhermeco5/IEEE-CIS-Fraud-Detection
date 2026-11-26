@@ -6,7 +6,7 @@ import pytest
 from xgboost import XGBClassifier
 
 from src.features import build_features, fit_frequency_encoder
-from src.serving import FraudScorer, HistoryStore
+from src.serving import FraudScorer, HistoryStore, typical_values
 
 NON_FEATURES = ["TransactionID", "TransactionDT", "isFraud"]
 CATEGORICAL = ["ProductCD", "P_emaildomain", "R_emaildomain", "DeviceType", "DeviceInfo", "id_31"]
@@ -58,6 +58,7 @@ def world():
         "raw_columns": list(raw.columns),
         "categories": {c: list(train_f[c].cat.categories) for c in CATEGORICAL},
         "freq_encoder": fit_frequency_encoder(train_f),
+        "typical_values": typical_values(train_f, list(raw.columns)),
         "history": HistoryStore.from_frame(train_f).to_dict(),
         "thresholds": {"alto": 0.7, "medio": 0.3},
     }
