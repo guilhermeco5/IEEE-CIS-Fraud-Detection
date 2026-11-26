@@ -20,7 +20,7 @@ RAW_IDENTITY_FILE = DATA_RAW_DIR / "train_identity.csv"
 
 # --- Split temporal ---
 # IEEE-CIS fornece TransactionDT (segundos desde um ponto de referência).
-# Split aleatório vaza informação do futuro para o treino — usar sempre
+# Split aleatório vaza informação do futuro para o treino: usar sempre
 # split temporal, treinando no passado e validando no "futuro".
 TEMPORAL_SPLIT_COLUMN = "TransactionDT"
 TEST_SIZE_FRACTION = 0.2  # últimos 20% no tempo vão para validação

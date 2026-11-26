@@ -20,4 +20,4 @@ Arquivos esperados nesta pasta após o download:
 - `test_transaction.csv`
 - `test_identity.csv`
 
-**Nenhum desses arquivos é versionado no Git** (ver `.gitignore` na raiz) — são grandes e não devem entrar no repositório.
+**Nenhum desses arquivos é versionado no Git** (ver `.gitignore` na raiz): são grandes e não devem entrar no repositório.

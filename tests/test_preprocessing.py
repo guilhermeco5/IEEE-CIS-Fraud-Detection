@@ -1,4 +1,4 @@
-"""Teste do split temporal — a decisão de design mais crítica do projeto.
+"""Teste do split temporal, a decisão de design mais crítica do projeto.
 
 Garante que train sempre vem antes de test no tempo, e que não há
 overlap entre os dois conjuntos.

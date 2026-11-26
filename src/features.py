@@ -1,6 +1,6 @@
 """Engenharia de features (Semana 2).
 
-Este módulo concentra as features derivadas — o que diferencia um
+Este módulo concentra as features derivadas, o que diferencia um
 projeto de "rodei um classificador" de um projeto de "fiz engenharia
 de dados para o problema de fraude". Cada função tem uma justificativa
 de negócio documentada no docstring.
@@ -8,7 +8,7 @@ de negócio documentada no docstring.
 Regra que vale para todas as features de entidade: cada linha só enxerga
 transações **estritamente anteriores** no tempo (`TransactionDT < t`).
 Transações com o mesmo timestamp da linha atual (empates) também ficam de
-fora — a ordem entre empates não é determinística, e incluí-las deixaria
+fora, porque a ordem entre empates não é determinística e incluí-las deixaria
 a feature dependente de um detalhe arbitrário do sort.
 """
 
@@ -75,7 +75,7 @@ def add_velocity_features(
     """Conta quantas transações a mesma entidade fez nas últimas N horas,
     e há quanto tempo foi a transação anterior.
 
-    Hipótese de negócio: fraude costuma vir em rajadas — um cartão
+    Hipótese de negócio: fraude costuma vir em rajadas; um cartão
     comprometido gera muitas transações em pouco tempo, diferente do
     padrão de uso legítimo.
 
@@ -111,7 +111,7 @@ def add_aggregation_features(
     entidade é um sinal de risco clássico (ex: fraudador "testando" o
     limite depois de compras pequenas).
 
-    Só usa o passado estrito — a própria linha nunca entra na sua média.
+    Só usa o passado estrito: a própria linha nunca entra na sua média.
     Colunas: `{entity}_n_prev`, `{entity}_amt_mean_prev`,
     `{entity}_amt_std_prev` (NaN com <2 transações anteriores),
     `{entity}_amt_max_prev`, `{entity}_amt_ratio_mean` (valor / média) e
@@ -151,7 +151,7 @@ def add_aggregation_features(
 
 
 def fit_frequency_encoder(train_df: pd.DataFrame, columns: list[str] | None = None) -> dict[str, pd.Series]:
-    """Aprende a frequência relativa de cada categoria — **só no treino**.
+    """Aprende a frequência relativa de cada categoria, **só no treino**.
 
     Por que frequency encoding e não target encoding: não usa o rótulo,
     então não há como vazar `isFraud` para a feature. Categorias raras

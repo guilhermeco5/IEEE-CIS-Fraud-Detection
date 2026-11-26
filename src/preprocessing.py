@@ -47,7 +47,7 @@ def report_missing_by_class(df: pd.DataFrame) -> pd.DataFrame:
     """Compara a taxa de valores ausentes entre fraude e não-fraude.
 
     Em datasets de fraude, a ausência de um dado (ex: identidade não
-    verificada) costuma ser, ela mesma, informativa — por isso vale
+    verificada) costuma ser, ela mesma, informativa; por isso vale
     checar isso antes de decidir como imputar, em vez de aplicar
     dropna/fillna sem investigar.
     """
